@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Local state and env
+.state/
+.state.json
+.env
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.env.*
+.venv/
+venv/
+.build/
+.dist/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Site build
+site/
+docs/_site/
+dist/
