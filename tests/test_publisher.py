@@ -1,4 +1,3 @@
-import os
 from src.publisher import publish
 
 

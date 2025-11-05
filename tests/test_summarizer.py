@@ -1,4 +1,3 @@
-import os
 from src.summarizer import summarize_for_miners
 
 
