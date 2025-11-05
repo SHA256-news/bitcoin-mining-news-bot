@@ -38,7 +38,9 @@ def _client():
             access_token_secret=x_access_token_secret,
             wait_on_rate_limit=True,
         )
-        logger.info("publisher: initialized Tweepy Client for v2 create_tweet (OAuth 1.0a user context)")
+        logger.info(
+            "publisher: initialized Tweepy Client for v2 create_tweet (OAuth 1.0a user context)"
+        )
         return client
     except Exception as e:
         logger.warning("publisher: failed to init tweepy client: %s", e)
@@ -85,12 +87,16 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
         resp1 = client.create_tweet(text=tweet1, user_auth=True)
         tid1 = str(resp1.data.get("id")) if getattr(resp1, "data", None) else ""
     except Exception as e:
-        logger.error("publisher: failed to create first tweet (v2 /2/tweets): %s", _extract_error_detail(e))
+        logger.error(
+            "publisher: failed to create first tweet (v2 /2/tweets): %s", _extract_error_detail(e)
+        )
         return "", ""
 
     # Reply with second tweet (URL)
     try:
-        resp2 = client.create_tweet(text=tweet2, in_reply_to_tweet_id=tid1 if tid1 else None, user_auth=True)
+        resp2 = client.create_tweet(
+            text=tweet2, in_reply_to_tweet_id=tid1 if tid1 else None, user_auth=True
+        )
         tid2 = str(resp2.data.get("id")) if getattr(resp2, "data", None) else ""
     except Exception as e:
         logger.error("publisher: failed to create reply tweet: %s", _extract_error_detail(e))

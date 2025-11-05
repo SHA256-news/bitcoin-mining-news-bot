@@ -23,10 +23,12 @@ def _session() -> requests.Session:
     adapter = HTTPAdapter(max_retries=retries)
     s.mount("https://", adapter)
     s.mount("http://", adapter)
-    s.headers.update({
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    })
+    s.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+    )
     return s
 
 
@@ -41,7 +43,9 @@ def _extract_main_text(html: str) -> str:
             if len(text) > 400:
                 return text
         # Fallback: role=main or id includes 'content'
-        main = soup.find(attrs={"role": "main"}) or soup.find(id=lambda x: x and "content" in x.lower())
+        main = soup.find(attrs={"role": "main"}) or soup.find(
+            id=lambda x: x and "content" in x.lower()
+        )
         if main:
             paras = [p.get_text(" ", strip=True) for p in main.find_all("p")]
             text = "\n".join([p for p in paras if p])
@@ -75,8 +79,14 @@ def _is_btc_sha256_article(article: Dict) -> bool:
 
     exclude_tokens = [
         "cloud mining",
-        "ethereum", " eth ", " eth,", " eth.",
-        "litecoin", " ltc ", " ltc,", " ltc.",
+        "ethereum",
+        " eth ",
+        " eth,",
+        " eth.",
+        "litecoin",
+        " ltc ",
+        " ltc,",
+        " ltc.",
         "dogecoin",
         " gpu",
     ]
@@ -212,6 +222,7 @@ def _pick_best(group: List[Dict]) -> Dict:
 
 def _signature(title: str) -> str:
     import re
+
     t = (title or "").lower()
     t = re.sub(r"[^a-z0-9\s]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
@@ -220,10 +231,15 @@ def _signature(title: str) -> str:
 
 def _numbers_and_units(text: str) -> list[str]:
     import re
+
     s = (text or "").lower()
     parts = []
     # Capture numbers with units like mw, gw, eh/s, zh/s, btc, $, %
-    for pat in [r"\b\$?\d+[,.\d]*\s*(mw|gw|eh/s|zh/s|th/s|btc|%|usd)\b", r"\b\d{1,3}(?:,\d{3})+\b", r"\b\d+\.?\d*\s*(mw|gw|eh/s|zh/s|th/s)\b"]:
+    for pat in [
+        r"\b\$?\d+[,.\d]*\s*(mw|gw|eh/s|zh/s|th/s|btc|%|usd)\b",
+        r"\b\d{1,3}(?:,\d{3})+\b",
+        r"\b\d+\.?\d*\s*(mw|gw|eh/s|zh/s|th/s)\b",
+    ]:
         parts += re.findall(pat, s)
     # Also keep raw numbers of key sizes
     nums = re.findall(r"\b\d{2,}\b", s)
@@ -234,16 +250,66 @@ def _numbers_and_units(text: str) -> list[str]:
 def _fingerprint(article: Dict) -> str:
     # Build a stable fingerprint using normalized title + key numbers/units + top tokens
     import re
+
     title = (article.get("title") or "").lower()
     text = (article.get("text") or "").lower()[:600]
     base = f"{title} {text}"
     # remove non-alnum
     base = re.sub(r"[^a-z0-9\s]", " ", base)
-    tokens = [t for t in base.split() if len(t) > 2 and t not in {"the","and","for","with","from","that","this","into","over","under","amid","into","have","has","was","were","will","your","their","ours","they","but","are","not","you","his","her","its","our","out"}]
+    tokens = [
+        t
+        for t in base.split()
+        if len(t) > 2
+        and t
+        not in {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "into",
+            "over",
+            "under",
+            "amid",
+            "into",
+            "have",
+            "has",
+            "was",
+            "were",
+            "will",
+            "your",
+            "their",
+            "ours",
+            "they",
+            "but",
+            "are",
+            "not",
+            "you",
+            "his",
+            "her",
+            "its",
+            "our",
+            "out",
+        }
+    ]
     # prioritize company/mining terms
     keep = []
     for t in tokens:
-        if t in {"bitcoin","mining","miner","miners","hashrate","difficulty","asic","reserve","treasury","expansion","capacity"}:
+        if t in {
+            "bitcoin",
+            "mining",
+            "miner",
+            "miners",
+            "hashrate",
+            "difficulty",
+            "asic",
+            "reserve",
+            "treasury",
+            "expansion",
+            "capacity",
+        }:
             keep.append(t)
     # add first few significant tokens
     keep += tokens[:8]
@@ -318,7 +384,11 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     "text": a.get("body") or a.get("text") or "",
                     "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
                     "article_uri": uri,
-                    "source": (a.get("source") or {}).get("title") if isinstance(a.get("source"), dict) else "",
+                    "source": (
+                        (a.get("source") or {}).get("title")
+                        if isinstance(a.get("source"), dict)
+                        else ""
+                    ),
                 }
                 # If API body is missing/short, optionally fetch full article HTML and extract text
                 if (not art["text"]) or len(art["text"]) < 500:
@@ -331,7 +401,9 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                                 if len(full) > len(art["text"]):
                                     art["text"] = full
                         except Exception as e:
-                            logger.debug("news_fetcher: full-article fetch failed for %s: %s", url2, e)
+                            logger.debug(
+                                "news_fetcher: full-article fetch failed for %s: %s", url2, e
+                            )
                 # Drop if hard-banned by domain or keyword
                 url_str = art.get("url", "")
                 host = _domain(urlparse(url_str).netloc)
@@ -352,7 +424,11 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             # Deduplicate by eventUri if present, otherwise by fingerprint, else by normalized title signature
             grouped: Dict[str, List[Dict]] = {}
             for art in articles:
-                key = art.get("event_uri") or art.get("fingerprint") or _signature(art.get("title", ""))
+                key = (
+                    art.get("event_uri")
+                    or art.get("fingerprint")
+                    or _signature(art.get("title", ""))
+                )
                 grouped.setdefault(key, []).append(art)
             picked = []
             for key, group in grouped.items():
@@ -361,7 +437,10 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     break
         logger.info(
             "news_fetcher: fetched raw=%s filtered=%s dedup=%s query=%s",
-            raw_total, len(articles), len(picked), query,
+            raw_total,
+            len(articles),
+            len(picked),
+            query,
         )
         return picked
     except Exception as e:

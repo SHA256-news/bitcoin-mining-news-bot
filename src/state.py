@@ -56,7 +56,9 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     cutoff = _now_ts() - window_hours * 3600
     # prune posted_fingerprints (dicts with ts)
     fps: List[Dict] = state.get("posted_fingerprints") or []
-    state["posted_fingerprints"] = [x for x in fps if isinstance(x, dict) and x.get("ts", 0) >= cutoff]
+    state["posted_fingerprints"] = [
+        x for x in fps if isinstance(x, dict) and x.get("ts", 0) >= cutoff
+    ]
     # prune posted_urls (migrate legacy strings by dropping them)
     urls = state.get("posted_urls") or []
     new_urls: List[Dict] = []
@@ -82,28 +84,32 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     state["summary_cache"] = [x for x in cache if isinstance(x, dict) and x.get("ts", 0) >= cutoff]
 
 
-def already_posted(url: str = "", event_uri: str = "", fingerprint: str = "", window_hours: int = 72) -> bool:
+def already_posted(
+    url: str = "", event_uri: str = "", fingerprint: str = "", window_hours: int = 72
+) -> bool:
     state = _load()
     _prune(state, window_hours)
     # Check recent events within window
     if event_uri:
-        for e in (state.get("posted_events") or []):
+        for e in state.get("posted_events") or []:
             if isinstance(e, dict) and e.get("event") == event_uri:
                 return True
     # Check recent fingerprints within window
     if fingerprint:
-        for x in (state.get("posted_fingerprints") or []):
+        for x in state.get("posted_fingerprints") or []:
             if isinstance(x, dict) and x.get("fp") == fingerprint:
                 return True
     # Check recent urls within window
     if url:
-        for u in (state.get("posted_urls") or []):
+        for u in state.get("posted_urls") or []:
             if isinstance(u, dict) and u.get("url") == url:
                 return True
     return False
 
 
-def mark_posted(url: str = "", event_uri: str = "", fingerprint: str = "", max_entries: int = 1000) -> None:
+def mark_posted(
+    url: str = "", event_uri: str = "", fingerprint: str = "", max_entries: int = 1000
+) -> None:
     state = _load()
     _prune(state)
     now = _now_ts()
@@ -133,16 +139,19 @@ def mark_posted(url: str = "", event_uri: str = "", fingerprint: str = "", max_e
 
 # Summary cache (72h window)
 
+
 def get_cached_summary(fingerprint: str, window_hours: int = 72):
     state = _load()
     _prune(state, window_hours)
-    for x in (state.get("summary_cache") or []):
+    for x in state.get("summary_cache") or []:
         if isinstance(x, dict) and x.get("fp") == fingerprint:
             return x.get("headline"), x.get("bullets")
     return None
 
 
-def set_cached_summary(fingerprint: str, headline: str, bullets: list[str], max_entries: int = 2000) -> None:
+def set_cached_summary(
+    fingerprint: str, headline: str, bullets: list[str], max_entries: int = 2000
+) -> None:
     state = _load()
     _prune(state)
     cache: List[Dict] = state.get("summary_cache") or []
@@ -155,8 +164,10 @@ def set_cached_summary(fingerprint: str, headline: str, bullets: list[str], max_
 
 # Gemini usage tracking (per day)
 
+
 def _today() -> str:
     import datetime as _dt
+
     return _dt.datetime.utcnow().strftime("%Y-%m-%d")
 
 

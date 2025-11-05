@@ -45,7 +45,9 @@ def run():
         fp = art.get("fingerprint", "")
         source_title = art.get("title", "")
         # Bypass dedup if DRY_RUN, otherwise enforce 72h dedup
-        if not dry_run and already_posted(url=url, event_uri=event_uri, fingerprint=fp, window_hours=72):
+        if not dry_run and already_posted(
+            url=url, event_uri=event_uri, fingerprint=fp, window_hours=72
+        ):
             logger.info("main: skipping already-posted event=%s fp=%s url=%s", event_uri, fp, url)
             continue
         headline, bullets = summarize_for_miners(art)
@@ -55,15 +57,19 @@ def run():
         # Deterministic de-dup across headline/bullets
         headline2, bullets2 = sanitize_summary(headline, bullets, source_title)
         if not bullets2:
-            logger.info("main: skipping after sanitize (empty bullets) event=%s url=%s", event_uri, url)
+            logger.info(
+                "main: skipping after sanitize (empty bullets) event=%s url=%s", event_uri, url
+            )
             continue
-        prepared.append({
-            "headline": headline2,
-            "bullets": bullets2,
-            "url": url,
-            "event_uri": event_uri,
-            "fingerprint": fp,
-        })
+        prepared.append(
+            {
+                "headline": headline2,
+                "bullets": bullets2,
+                "url": url,
+                "event_uri": event_uri,
+                "fingerprint": fp,
+            }
+        )
 
     # DRY_RUN: preview all threads
     if dry_run:
@@ -83,12 +89,19 @@ def run():
         t2 = compose_tweet_2(item["url"])
         tid1, tid2 = publish(t1, t2)
         if tid1:
-            mark_posted(url=item["url"], event_uri=item["event_uri"], fingerprint=item["fingerprint"]) 
+            mark_posted(
+                url=item["url"], event_uri=item["event_uri"], fingerprint=item["fingerprint"]
+            )
             posted = True
             if len(prepared) > 1:
                 push_many(prepared[1:])
         else:
-            logger.warning("main: publish failed; not marking posted event=%s fp=%s url=%s", item.get("event_uri",""), item.get("fingerprint",""), item.get("url",""))
+            logger.warning(
+                "main: publish failed; not marking posted event=%s fp=%s url=%s",
+                item.get("event_uri", ""),
+                item.get("fingerprint", ""),
+                item.get("url", ""),
+            )
     if not posted:
         q = pop_one()
         if q:
@@ -96,9 +109,18 @@ def run():
             t2 = compose_tweet_2(q["url"])
             tid1, tid2 = publish(t1, t2)
             if tid1:
-                mark_posted(url=q.get("url",""), event_uri=q.get("event_uri",""), fingerprint=q.get("fingerprint",""))
+                mark_posted(
+                    url=q.get("url", ""),
+                    event_uri=q.get("event_uri", ""),
+                    fingerprint=q.get("fingerprint", ""),
+                )
             else:
-                logger.warning("main: publish failed (queue); not marking posted event=%s fp=%s url=%s", q.get("event_uri",""), q.get("fingerprint",""), q.get("url",""))
+                logger.warning(
+                    "main: publish failed (queue); not marking posted event=%s fp=%s url=%s",
+                    q.get("event_uri", ""),
+                    q.get("fingerprint", ""),
+                    q.get("url", ""),
+                )
 
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
     api_key = os.getenv("GOOGLE_API_KEY")
     model_name_pro = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
     model_name_flash = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
-    prefer_pro = bool(os.getenv("PREFER_GEMINI_PRO", "1") not in {"0","false","no"})
+    prefer_pro = bool(os.getenv("PREFER_GEMINI_PRO", "1") not in {"0", "false", "no"})
 
     # Summary cache by fingerprint
     fp = (article.get("fingerprint") or "").strip()
@@ -155,7 +155,9 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
             raise
 
     # choose model: prefer pro if allowed; otherwise flash
-    chosen_model = model_name_pro if prefer_pro and gemini_remaining(model_name_pro) > 0 else model_name_flash
+    chosen_model = (
+        model_name_pro if prefer_pro and gemini_remaining(model_name_pro) > 0 else model_name_flash
+    )
     logger.info(
         "summarizer: model=%s prefer_pro=%s rem_pro=%s rem_flash=%s fp=%s",
         chosen_model,

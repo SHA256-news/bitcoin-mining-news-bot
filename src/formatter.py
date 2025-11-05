@@ -21,7 +21,9 @@ def _numbers(text: str) -> set[str]:
     return set(re.findall(r"\$?\d[\d,\.]*%?", s))
 
 
-def sanitize_summary(headline: str, bullets: list[str], source_title: str = "") -> tuple[str, list[str]]:
+def sanitize_summary(
+    headline: str, bullets: list[str], source_title: str = ""
+) -> tuple[str, list[str]]:
     # Ensure headline differs from source title; avoid repeating headline numbers/phrases in bullets
     head = (headline or "").strip()
     if source_title:
@@ -29,7 +31,11 @@ def sanitize_summary(headline: str, bullets: list[str], source_title: str = "") 
         st = set(_tokens(source_title))
         overlap = len(ht & st)
         if ht and overlap / max(1, len(ht)) > 0.6:
-            cleaned = [t for t in head.split() if t.lower() not in st and t.lower() not in {"the","a","an"}]
+            cleaned = [
+                t
+                for t in head.split()
+                if t.lower() not in st and t.lower() not in {"the", "a", "an"}
+            ]
             head = ("For Bitcoin miners: " + " ".join(cleaned)).strip()
             head = head[:80]
 
@@ -60,7 +66,7 @@ def sanitize_summary(headline: str, bullets: list[str], source_title: str = "") 
     def _cap_first_alpha(s: str) -> str:
         for i, ch in enumerate(s):
             if ch.isalpha():
-                return s[:i] + ch.upper() + s[i+1:]
+                return s[:i] + ch.upper() + s[i + 1 :]
         return s
 
     cleaned: list[str] = []
@@ -112,7 +118,7 @@ def _word_trim(text: str, limit: int) -> str:
 def _compose_smart(headline: str, bullets: list[str], limit: int = MAX_TWEET_LEN) -> str:
     """Compose multiline tweet:
     Headline
-    
+
     • b1
     • b2
     • b3
