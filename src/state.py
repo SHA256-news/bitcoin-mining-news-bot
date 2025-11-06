@@ -136,10 +136,12 @@ def mark_posted(
             state["posted_events"] = evs
     if fingerprint:
         fps: List[Dict] = state.get("posted_fingerprints") or []
-        fps.append({"fp": fingerprint, "ts": now})
-        if len(fps) > max_entries:
-            fps = fps[-max_entries:]
-        state["posted_fingerprints"] = fps
+        # avoid duplicates
+        if not any(isinstance(f, dict) and f.get("fp") == fingerprint for f in fps):
+            fps.append({"fp": fingerprint, "ts": now})
+            if len(fps) > max_entries:
+                fps = fps[-max_entries:]
+            state["posted_fingerprints"] = fps
     _save(state)
 
 

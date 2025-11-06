@@ -252,7 +252,8 @@ def _fingerprint(article: Dict) -> str:
     import re
 
     title = (article.get("title") or "").lower()
-    text = (article.get("text") or "").lower()[:600]
+    # Use more text for better dedup (1200 chars instead of 600)
+    text = (article.get("text") or "").lower()[:1200]
     base = f"{title} {text}"
     # remove non-alnum
     base = re.sub(r"[^a-z0-9\s]", " ", base)
@@ -311,8 +312,8 @@ def _fingerprint(article: Dict) -> str:
             "capacity",
         }:
             keep.append(t)
-    # add first few significant tokens
-    keep += tokens[:8]
+    # add first few significant tokens (increased from 8 to 12 for better uniqueness)
+    keep += tokens[:12]
     # add numbers/units
     keep += _numbers_and_units(f"{title} {text}")
     # dedupe and join
@@ -320,7 +321,8 @@ def _fingerprint(article: Dict) -> str:
     for k in keep:
         if k not in seen:
             seen.append(k)
-    fp = " ".join(seen[:20]).strip()
+    # Increased from 20 to 25 tokens for more stable fingerprints
+    fp = " ".join(seen[:25]).strip()
     return fp
 
 

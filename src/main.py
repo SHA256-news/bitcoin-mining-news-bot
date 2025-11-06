@@ -99,38 +99,39 @@ def run():
         t2 = compose_tweet_2(item["url"])
         tid1, tid2 = publish(t1, t2)
         if tid1:
-            mark_posted(
-                url=item["url"], event_uri=item["event_uri"], fingerprint=item["fingerprint"]
-            )
             posted = True
             if len(prepared) > 1:
                 push_many(prepared[1:])
         else:
             logger.warning(
-                "main: publish failed; not marking posted event=%s fp=%s url=%s",
+                "main: publish failed event=%s fp=%s url=%s",
                 item.get("event_uri", ""),
                 item.get("fingerprint", ""),
                 item.get("url", ""),
             )
+        # Always mark as posted (even on failure) to prevent duplicate attempts
+        mark_posted(
+            url=item["url"], event_uri=item["event_uri"], fingerprint=item["fingerprint"]
+        )
     if not posted:
         q = pop_one()
         if q:
             t1 = compose_tweet_1(q["headline"], q["bullets"])
             t2 = compose_tweet_2(q["url"])
             tid1, tid2 = publish(t1, t2)
-            if tid1:
-                mark_posted(
-                    url=q.get("url", ""),
-                    event_uri=q.get("event_uri", ""),
-                    fingerprint=q.get("fingerprint", ""),
-                )
-            else:
+            if not tid1:
                 logger.warning(
-                    "main: publish failed (queue); not marking posted event=%s fp=%s url=%s",
+                    "main: publish failed (queue) event=%s fp=%s url=%s",
                     q.get("event_uri", ""),
                     q.get("fingerprint", ""),
                     q.get("url", ""),
                 )
+            # Always mark as posted (even on failure) to prevent duplicate attempts
+            mark_posted(
+                url=q.get("url", ""),
+                event_uri=q.get("event_uri", ""),
+                fingerprint=q.get("fingerprint", ""),
+            )
 
 
 if __name__ == "__main__":

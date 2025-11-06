@@ -38,17 +38,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Compute weekly cache key
-        id: week
-        run: echo "CACHE_WEEK=$(date +%G-W%V)" >> $GITHUB_ENV
+      - name: Compute cache keys
+        id: cache-keys
+        run: |
+          echo "CACHE_WEEK=$(date +%G-W%V)" >> $GITHUB_ENV
+          echo "CACHE_RUN=$(date +%s)-${{ github.run_id }}" >> $GITHUB_ENV
 
       - name: Restore state cache
         id: cache-state
         uses: actions/cache/restore@v4
         with:
           path: .state
-          key: news-bot-state-${{ env.CACHE_WEEK }}
+          key: news-bot-state-${{ env.CACHE_WEEK }}-${{ env.CACHE_RUN }}
           restore-keys: |
+            news-bot-state-${{ env.CACHE_WEEK }}-
             news-bot-state-
 
       - name: Ensure state dir exists
@@ -74,4 +77,4 @@ jobs:
         if: always()
         with:
           path: .state
-          key: news-bot-state-${{ env.CACHE_WEEK }}
+          key: news-bot-state-${{ env.CACHE_WEEK }}-${{ env.CACHE_RUN }}
