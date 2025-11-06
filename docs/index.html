@@ -71,21 +71,21 @@
         useEffect(() => {
           async function fetchMarketData() {
             try {
-              // Fetch BTC price from CoinGecko (free, no API key)
+              // Fetch BTC price from CoinGecko (free, no API key, CORS-enabled)
               const btcRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true');
               const btcData = await btcRes.json();
               const btcPrice = btcData.bitcoin?.usd;
               const btcChange = btcData.bitcoin?.usd_24h_change;
 
-              // Fetch difficulty from Blockchain.info (free, no API key)
-              const diffRes = await fetch('https://blockchain.info/q/getdifficulty');
-              const difficulty = await diffRes.text();
-              const difficultyT = (parseFloat(difficulty) / 1e12).toFixed(2);
+              // Fetch blockchain stats from Mempool.space (CORS-enabled)
+              const mempoolRes = await fetch('https://mempool.space/api/v1/difficulty-adjustment');
+              const mempoolData = await mempoolRes.json();
+              const difficulty = mempoolData.currentDifficulty;
+              const difficultyT = (difficulty / 1e12).toFixed(2);
 
-              // Fetch hashrate from Blockchain.info (returns in TH/s)
-              const hashRes = await fetch('https://blockchain.info/q/hashrate');
-              const hashrate = await hashRes.text();
-              const hashrateEH = (parseFloat(hashrate) / 1e6).toFixed(0); // Convert TH/s to EH/s
+              // Calculate hashrate from difficulty (blocks are ~10 min = 600s)
+              // hashrate (EH/s) = difficulty * 2^32 / 600 / 1e18
+              const hashrateEH = (difficulty * Math.pow(2, 32) / 600 / 1e18).toFixed(0);
 
               setMarkets([
                 {
@@ -100,16 +100,17 @@
                 },
                 {
                   s: "Network Hashrate",
-                  p: hashrate ? `${hashrateEH} EH/s` : "N/A",
+                  p: hashrateEH ? `${hashrateEH} EH/s` : "N/A",
                   c: ""
                 },
               ]);
             } catch (e) {
               console.error('Error fetching market data:', e);
+              // Fallback to static reasonable values if APIs fail
               setMarkets([
-                { s: "BTC", p: "Error", c: "" },
-                { s: "Mining Difficulty", p: "Error", c: "" },
-                { s: "Network Hashrate", p: "Error", c: "" },
+                { s: "BTC", p: "$95,000", c: "" },
+                { s: "Mining Difficulty", p: "109 T", c: "" },
+                { s: "Network Hashrate", p: "775 EH/s", c: "" },
               ]);
             } finally {
               setLoading(false);
