@@ -114,7 +114,11 @@ def already_posted(
     """
     state = _load()
     # Prune with the max window to ensure we keep enough entries for both windows
-    _prune(state, max(window_hours, event_window_hours or window_hours))
+    # Use provided event_window_hours even if set to 0
+    _prune(
+        state,
+        max(window_hours, event_window_hours if event_window_hours is not None else window_hours),
+    )
 
     # Check article_uri FIRST (most reliable from Event Registry)
     article_seen = False
@@ -126,7 +130,8 @@ def already_posted(
 
     # Check recent events with separate window if provided
     if event_uri:
-        cutoff_event = _now_ts() - (event_window_hours or window_hours) * 3600
+        cutoff_event_hours = event_window_hours if event_window_hours is not None else window_hours
+        cutoff_event = _now_ts() - cutoff_event_hours * 3600
         for e in state.get("posted_events") or []:
             if (
                 isinstance(e, dict)
