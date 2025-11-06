@@ -117,9 +117,11 @@ def already_posted(
     _prune(state, max(window_hours, event_window_hours or window_hours))
 
     # Check article_uri FIRST (most reliable from Event Registry)
+    article_seen = False
     if article_uri:
         for a in state.get("posted_article_uris") or []:
             if isinstance(a, dict) and a.get("article_uri") == article_uri:
+                article_seen = True
                 return True
 
     # Check recent events with separate window if provided
@@ -137,14 +139,24 @@ def already_posted(
     if fingerprint:
         cutoff = _now_ts() - window_hours * 3600
         for x in state.get("posted_fingerprints") or []:
-            if isinstance(x, dict) and x.get("fp") == fingerprint and int(x.get("ts", 0)) >= cutoff:
+            if (
+                isinstance(x, dict)
+                and x.get("fp") == fingerprint
+                and int(x.get("ts", 0)) >= cutoff
+                and (not article_uri or article_seen)
+            ):
                 return True
 
     # Check recent urls within window
     if url:
         cutoff = _now_ts() - window_hours * 3600
         for u in state.get("posted_urls") or []:
-            if isinstance(u, dict) and u.get("url") == url and int(u.get("ts", 0)) >= cutoff:
+            if (
+                isinstance(u, dict)
+                and u.get("url") == url
+                and int(u.get("ts", 0)) >= cutoff
+                and (not article_uri or article_seen)
+            ):
                 return True
 
     return False

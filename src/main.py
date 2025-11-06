@@ -127,6 +127,13 @@ def run():
             push_many(list(reversed(prepared[1:])))
         if tid1:
             posted = True
+            # Only mark as posted on success
+            mark_posted(
+                url=item["url"],
+                event_uri=item["event_uri"],
+                article_uri=item.get("article_uri", ""),
+                fingerprint=item["fingerprint"],
+            )
         else:
             logger.warning(
                 "main: publish failed event=%s fp=%s url=%s",
@@ -134,33 +141,26 @@ def run():
                 item.get("fingerprint", ""),
                 item.get("url", ""),
             )
-        # Always mark as posted (even on failure) to prevent duplicate attempts
-        mark_posted(
-            url=item["url"],
-            event_uri=item["event_uri"],
-            article_uri=item.get("article_uri", ""),
-            fingerprint=item["fingerprint"],
-        )
     if not posted:
         q = pop_one()
         if q:
             t1 = compose_tweet_1(q["headline"], q["bullets"])
             t2 = compose_tweet_2(q["url"])
             tid1, tid2 = publish(t1, t2)
-            if not tid1:
+            if tid1:
+                mark_posted(
+                    url=q.get("url", ""),
+                    event_uri=q.get("event_uri", ""),
+                    article_uri=q.get("article_uri", ""),
+                    fingerprint=q.get("fingerprint", ""),
+                )
+            else:
                 logger.warning(
                     "main: publish failed (queue) event=%s fp=%s url=%s",
                     q.get("event_uri", ""),
                     q.get("fingerprint", ""),
                     q.get("url", ""),
                 )
-            # Always mark as posted (even on failure) to prevent duplicate attempts
-            mark_posted(
-                url=q.get("url", ""),
-                event_uri=q.get("event_uri", ""),
-                article_uri=q.get("article_uri", ""),
-                fingerprint=q.get("fingerprint", ""),
-            )
 
 
 if __name__ == "__main__":
