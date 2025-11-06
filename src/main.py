@@ -49,7 +49,12 @@ def run():
         if not dry_run and already_posted(
             url=url, event_uri=event_uri, fingerprint=fp, article_uri=article_uri, window_hours=72
         ):
-            logger.info("main: skipping already-posted article_uri=%s event=%s url=%s", article_uri, event_uri, url)
+            logger.info(
+                "main: skipping already-posted article_uri=%s event=%s url=%s",
+                article_uri,
+                event_uri,
+                url,
+            )
             continue
         headline, bullets = summarize_for_miners(art)
         if not headline or not bullets:

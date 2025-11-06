@@ -1,4 +1,5 @@
 """Generate daily brief blog posts from fetched articles."""
+
 import datetime
 import json
 import logging
@@ -24,47 +25,47 @@ def _format_date(date_str: str) -> str:
 
 def generate_daily_brief(hours: int = 24) -> str:
     """Generate HTML blog post for all fetched articles in the last N hours.
-    
+
     Returns the filename of the generated post.
     """
     articles = get_fetched_articles_since(hours)
-    
+
     if not articles:
         logger.info("daily_brief: no articles to include in brief")
         return ""
-    
+
     # Sort by timestamp (newest first)
     articles.sort(key=lambda a: a.get("ts", 0), reverse=True)
-    
+
     # Generate date string for post
     now = datetime.datetime.utcnow()
     date_str = now.strftime("%Y-%m-%d")
     display_date = now.strftime("%B %d, %Y")
-    
+
     # Create post filename
     post_filename = f"{date_str}-daily-brief.html"
-    
+
     # Generate HTML content
     html = _generate_post_html(articles, display_date)
-    
+
     # Write to docs/posts/
     posts_dir = pathlib.Path("docs/posts")
     posts_dir.mkdir(parents=True, exist_ok=True)
-    
+
     post_path = posts_dir / post_filename
     post_path.write_text(html, encoding="utf-8")
-    
+
     logger.info(f"daily_brief: generated {post_filename} with {len(articles)} articles")
-    
+
     # Update posts index
     _update_posts_index(post_filename, display_date, len(articles))
-    
+
     return post_filename
 
 
 def _generate_post_html(articles: List[Dict], display_date: str) -> str:
     """Generate HTML for a blog post."""
-    
+
     # Build articles HTML
     articles_html = []
     for art in articles:
@@ -72,10 +73,11 @@ def _generate_post_html(articles: List[Dict], display_date: str) -> str:
         bullets = art.get("bullets", [])
         url = art.get("url", "")
         source_title = art.get("source_title", "")
-        
+
         bullets_html = "\n".join([f"              <li>{bullet}</li>" for bullet in bullets])
-        
-        articles_html.append(f"""
+
+        articles_html.append(
+            f"""
           <article class="border-b border-zinc-800 pb-8 mb-8">
             <h3 class="font-serif text-2xl mb-3">{headline}</h3>
             <ul class="list-disc list-inside space-y-1 text-zinc-300 mb-3">
@@ -84,10 +86,11 @@ def _generate_post_html(articles: List[Dict], display_date: str) -> str:
             <div class="text-sm text-zinc-400">
               Source: <a href="{url}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 underline">{source_title or "Article"}</a>
             </div>
-          </article>""")
-    
+          </article>"""
+        )
+
     articles_section = "\n".join(articles_html)
-    
+
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -146,7 +149,7 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
     """Update posts/index.json with new post metadata."""
     posts_dir = pathlib.Path("docs/posts")
     index_path = posts_dir / "index.json"
-    
+
     # Load existing index
     if index_path.exists():
         try:
@@ -155,17 +158,20 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
             index = {"posts": []}
     else:
         index = {"posts": []}
-    
+
     # Check if already exists
     posts = index.get("posts", [])
     if not any(p.get("filename") == filename for p in posts):
-        posts.insert(0, {
-            "filename": filename,
-            "date": display_date,
-            "article_count": article_count,
-        })
+        posts.insert(
+            0,
+            {
+                "filename": filename,
+                "date": display_date,
+                "article_count": article_count,
+            },
+        )
         index["posts"] = posts
-        
+
         # Save updated index
         index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -173,16 +179,16 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
 if __name__ == "__main__":
     import sys
     from dotenv import load_dotenv
-    
+
     load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    
+
     # Allow custom hours via CLI
     hours = int(sys.argv[1]) if len(sys.argv) > 1 else 24
-    
+
     filename = generate_daily_brief(hours)
     if filename:
         print(f"Generated: docs/posts/{filename}")

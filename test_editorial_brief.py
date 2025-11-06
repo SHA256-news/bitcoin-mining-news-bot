@@ -1,4 +1,5 @@
 """Test script for editorial daily brief generation with enhanced Gemini analysis."""
+
 from google import genai
 from google.genai import types
 
@@ -10,60 +11,62 @@ articles = [
     {
         "headline": "Europe's Largest Crypto Miner Northern Data Scraps $200M Bitcoin Mining Unit for AI Gold Rush",
         "date": "Sun, 02 Nov 2025",
-        "summary": "Europe's largest Bitcoin miner, Northern Data Group, is selling its BTC mining arm for up to $200 million. The company will reinvest proceeds into high-performance computing (HPC) and artificial intelligence (AI) infrastructure."
+        "summary": "Europe's largest Bitcoin miner, Northern Data Group, is selling its BTC mining arm for up to $200 million. The company will reinvest proceeds into high-performance computing (HPC) and artificial intelligence (AI) infrastructure.",
     },
     {
         "headline": "Microsoft's $9.7 billion deal with IREN shows bitcoin miners' AI pivot is paying off",
         "date": "Sun, 02 Nov 2025",
-        "summary": "Microsoft struck a $9.7 billion deal making former bitcoin miner IREN its largest customer. Under the five-year agreement, the neo-cloud operator will provide Microsoft access to Nvidia chips at its Childress, Texas facility."
+        "summary": "Microsoft struck a $9.7 billion deal making former bitcoin miner IREN its largest customer. Under the five-year agreement, the neo-cloud operator will provide Microsoft access to Nvidia chips at its Childress, Texas facility.",
     },
     {
         "headline": "IREN Stock Soars 30% to Record $75.73 After $9.7B Microsoft AI Cloud Deal",
         "date": "Sun, 02 Nov 2025",
-        "summary": "Iren Ltd soared to all-time high of $75.73, marking 613.87% increase year-over-year, driven by $9.7 billion AI infrastructure deal with Microsoft."
+        "summary": "Iren Ltd soared to all-time high of $75.73, marking 613.87% increase year-over-year, driven by $9.7 billion AI infrastructure deal with Microsoft.",
     },
     {
         "headline": "TeraWulf (WULF) Hits New All-Time High on New $9.5-Billion Fluidstack Deal",
         "date": "Mon, 27 Oct 2025",
-        "summary": "TeraWulf soared to a new all-time high, as investors cheered a new $9.5 billion deal with Fluidstack for the joint development of a new data center at the Abernathy campus in Texas."
+        "summary": "TeraWulf soared to a new all-time high, as investors cheered a new $9.5 billion deal with Fluidstack for the joint development of a new data center at the Abernathy campus in Texas.",
     },
     {
         "headline": "CleanSpark stock rises after Texas land acquisition for AI data center",
         "date": "Sun, 26 Oct 2025",
-        "summary": "CleanSpark acquired rights to approximately 271 acres in Austin County, Texas, with power agreements totaling 285 megawatts for AI data center campus."
+        "summary": "CleanSpark acquired rights to approximately 271 acres in Austin County, Texas, with power agreements totaling 285 megawatts for AI data center campus.",
     },
     {
         "headline": "Canaan Inc. (CAN) Launches its Latest Generation Bitcoin Mining Machine, the Avalon A16 Series",
         "date": "Wed, 29 Oct 2025",
-        "summary": "Canaan Inc. announced the official launch of its latest generation bitcoin mining machine, the Avalon A16 series at the Blockchain Life 2025 summit in Dubai. The A16XP air-cooled model delivers 300 terahash per second (TH/s)."
+        "summary": "Canaan Inc. announced the official launch of its latest generation bitcoin mining machine, the Avalon A16 series at the Blockchain Life 2025 summit in Dubai. The A16XP air-cooled model delivers 300 terahash per second (TH/s).",
     },
     {
         "headline": "HIVE Digital's Mining Capacity Soars 283% as Firm Eyes 25 EH/s by Thanksgiving",
         "date": "Thu, 30 Oct 2025",
-        "summary": "HIVE Digital hit 23 EH/s of bitcoin mining capacity, representing 283% growth this year and is on track to reach 25 EH/s before Thanksgiving."
+        "summary": "HIVE Digital hit 23 EH/s of bitcoin mining capacity, representing 283% growth this year and is on track to reach 25 EH/s before Thanksgiving.",
     },
     {
         "headline": "Riot Platforms Q3 2025 beats revenue forecast",
         "date": "Wed, 29 Oct 2025",
-        "summary": "Riot Platforms reported Q3 earnings with revenues at $180.2 million, compared to forecasted $169.24 million. EPS of $0.26, significantly higher than anticipated -$0.16. Stock fell by 4.89% despite positive results."
+        "summary": "Riot Platforms reported Q3 earnings with revenues at $180.2 million, compared to forecasted $169.24 million. EPS of $0.26, significantly higher than anticipated -$0.16. Stock fell by 4.89% despite positive results.",
     },
     {
         "headline": "Abu Dhabi-based NIP Group expands global bitcoin mining capacity",
         "date": "Fri, 31 Oct 2025",
-        "summary": "NIP Group announced expansion of Bitcoin mining operations, increasing total capacity to approximately 11.3 EH/s, becoming largest in MENA region."
+        "summary": "NIP Group announced expansion of Bitcoin mining operations, increasing total capacity to approximately 11.3 EH/s, becoming largest in MENA region.",
     },
     {
         "headline": "UAE Telecom Giant du Enters Crypto Mining",
         "date": "Sat, 01 Nov 2025",
-        "summary": "UAE-based telecom giant du has launched its Cloud Miner, a mining-as-a-service platform. Plans start at 250 terahashes for UAE residents."
+        "summary": "UAE-based telecom giant du has launched its Cloud Miner, a mining-as-a-service platform. Plans start at 250 terahashes for UAE residents.",
     },
 ]
 
 # Build the article list for the prompt
-article_text = "\n\n".join([
-    f"**{i+1}. {art['headline']}** ({art['date']})\n{art['summary']}"
-    for i, art in enumerate(articles)
-])
+article_text = "\n\n".join(
+    [
+        f"**{i+1}. {art['headline']}** ({art['date']})\n{art['summary']}"
+        for i, art in enumerate(articles)
+    ]
+)
 
 # Enhanced editorial prompt with research requirement
 prompt = f"""You are a senior editor at SHA256 News, a premium Bitcoin mining publication read by mining executives, operators, and institutional investors.
@@ -161,9 +164,7 @@ print("=" * 80)
 print()
 
 # Configure grounding tool for real-time Google Search
-grounding_tool = types.Tool(
-    google_search=types.GoogleSearch()
-)
+grounding_tool = types.Tool(google_search=types.GoogleSearch())
 
 config = types.GenerateContentConfig(
     tools=[grounding_tool],
@@ -180,20 +181,20 @@ response = client.models.generate_content(
 brief = response.text
 
 # Show grounding metadata if available
-if hasattr(response, 'candidates') and response.candidates:
+if hasattr(response, "candidates") and response.candidates:
     candidate = response.candidates[0]
-    if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+    if hasattr(candidate, "grounding_metadata") and candidate.grounding_metadata:
         print("\n" + "=" * 80)
         print("GROUNDING METADATA (Sources Used):")
         print("=" * 80)
         metadata = candidate.grounding_metadata
-        if hasattr(metadata, 'web_search_queries') and metadata.web_search_queries:
+        if hasattr(metadata, "web_search_queries") and metadata.web_search_queries:
             print("\nSearch queries executed:")
             for query in metadata.web_search_queries:
                 print(f"  - {query}")
-        if hasattr(metadata, 'grounding_chunks') and metadata.grounding_chunks:
+        if hasattr(metadata, "grounding_chunks") and metadata.grounding_chunks:
             print(f"\nSources cited: {len(metadata.grounding_chunks)}")
-        print("="* 80 + "\n")
+        print("=" * 80 + "\n")
 
 print(brief)
 print()

@@ -290,7 +290,7 @@ def _get_trending_score(api_key: str, query: str) -> Dict:
 def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> List[Dict]:
     """Fetch clustered events first, then get articles about those events."""
     from datetime import datetime, timedelta
-    
+
     try:
         url = "https://eventregistry.org/api/v1/event/getEvents"
         params = {
@@ -307,14 +307,14 @@ def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> Li
             "includeEventSocialScore": True,
             "includeEventArticleCounts": True,
         }
-        
+
         # Use concept URIs if available, otherwise fall back to keyword
         if concept_uris:
             params["conceptUri"] = concept_uris
             params["conceptOper"] = "or"
         else:
             params["keyword"] = query
-        
+
         r = _session().get(url, params=params, timeout=20)
         if r.ok:
             data = r.json()
@@ -374,32 +374,65 @@ def _fingerprint(article: Dict) -> str:
             "out",
         }
     ]
-    
+
     # Extract company names (common mining companies)
     company_names = {
-        "hut", "cleanspark", "riot", "marathon", "cipher", "iris", "bitfarms",
-        "canaan", "bitmain", "microbt", "core", "scientific", "argo", "terawulf",
-        "stronghold", "greenidge", "bitdeer", "cango", "alps"
+        "hut",
+        "cleanspark",
+        "riot",
+        "marathon",
+        "cipher",
+        "iris",
+        "bitfarms",
+        "canaan",
+        "bitmain",
+        "microbt",
+        "core",
+        "scientific",
+        "argo",
+        "terawulf",
+        "stronghold",
+        "greenidge",
+        "bitdeer",
+        "cango",
+        "alps",
     }
     companies = [t for t in tokens if t in company_names]
-    
+
     # Extract topic indicators (earnings, expansion, etc)
     topic_indicators = {
-        "earnings", "revenue", "q1", "q2", "q3", "q4", "quarter", "quarterly",
-        "expansion", "capacity", "hashrate", "acquisition", "merger", "ipo",
-        "holdings", "treasury", "reserve", "liquidation", "sale", "pivot"
+        "earnings",
+        "revenue",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+        "quarter",
+        "quarterly",
+        "expansion",
+        "capacity",
+        "hashrate",
+        "acquisition",
+        "merger",
+        "ipo",
+        "holdings",
+        "treasury",
+        "reserve",
+        "liquidation",
+        "sale",
+        "pivot",
     }
     topics = [t for t in tokens if t in topic_indicators]
-    
+
     # prioritize company + topic combination for better duplicate detection
     keep = []
-    
+
     # Add companies first (most important for dedup)
     keep.extend(companies[:3])
-    
+
     # Add topic indicators
     keep.extend(topics[:3])
-    
+
     # Add priority mining terms
     for t in tokens:
         if t in {
@@ -412,13 +445,13 @@ def _fingerprint(article: Dict) -> str:
             "asic",
         }:
             keep.append(t)
-    
+
     # add first few significant tokens (but fewer now since we have companies/topics)
     keep += tokens[:8]
-    
+
     # add key numbers/units (fewer to reduce noise)
     keep += _numbers_and_units(f"{title} {text}")[:5]
-    
+
     # dedupe and join
     seen = []
     for k in keep:
@@ -456,7 +489,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
     concept_uris = _get_concept_uris(api_key, query)
     if concept_uris:
         logger.info("news_fetcher: using concept URIs: %s", concept_uris)
-    
+
     # Check for trending spikes
     trending = _get_trending_score(api_key, query)
     if trending.get("is_spike"):
@@ -465,11 +498,11 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             trending["recent"],
             trending["average"],
         )
-    
+
     # Try event-based fetching first for better clustering
     events = _fetch_events_first(api_key, query, concept_uris)
     event_uris = [e.get("uri") for e in events if e.get("uri")]
-    
+
     # Enhanced query payload with all optimizations
     base_params = {
         "apiKey": api_key,
@@ -496,7 +529,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
         # Include source ranking info
         "includeSourceRanking": True,
     }
-    
+
     # Use concept URIs if available, otherwise fall back to keyword
     if concept_uris:
         base_params["conceptUri"] = concept_uris
@@ -529,16 +562,24 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                 if uri in seen_uris:
                     continue
                 seen_uris.add(uri)
-                
+
                 # Extract social score and sentiment
-                social_score = (a.get("shares") or {}).get("facebook", 0) if isinstance(a.get("shares"), dict) else 0
+                social_score = (
+                    (a.get("shares") or {}).get("facebook", 0)
+                    if isinstance(a.get("shares"), dict)
+                    else 0
+                )
                 sentiment = a.get("sentiment")
-                
+
                 # Filter out articles with very negative sentiment (< -0.3)
                 if sentiment is not None and sentiment < -0.3:
-                    logger.debug("news_fetcher: skipping negative article sentiment=%.2f uri=%s", sentiment, uri)
+                    logger.debug(
+                        "news_fetcher: skipping negative article sentiment=%.2f uri=%s",
+                        sentiment,
+                        uri,
+                    )
                     continue
-                
+
                 art = {
                     "title": a.get("title") or "",
                     "url": a.get("url") or "",
@@ -606,8 +647,13 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     break
         # Log summary with new metrics
         avg_social = sum(a.get("social_score", 0) for a in picked) / len(picked) if picked else 0
-        avg_sentiment = sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None) / len(picked) if picked else 0
-        
+        avg_sentiment = (
+            sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None)
+            / len(picked)
+            if picked
+            else 0
+        )
+
         logger.info(
             "news_fetcher: fetched raw=%s filtered=%s dedup=%s query=%s events=%d",
             raw_total,
@@ -622,17 +668,17 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             avg_sentiment,
             trending.get("is_spike", False),
         )
-        
+
         # Log dates of picked articles for debugging freshness
         if picked:
             dates = [a.get("date", "unknown") for a in picked]
             logger.info("news_fetcher: picked article dates: %s", dates)
-        
+
         # Add metadata to picked articles
         for art in picked:
             art["_spike_detected"] = trending.get("is_spike", False)
             art["_event_count"] = len(event_uris)
-        
+
         return picked
     except Exception as e:
         logger.warning("news_fetcher: fetch error: %s", e)

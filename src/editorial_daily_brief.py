@@ -1,4 +1,5 @@
 """Generate editorial daily briefs with Google Search grounding."""
+
 import datetime
 import json
 import logging
@@ -14,46 +15,48 @@ logger = logging.getLogger(__name__)
 
 def generate_editorial_brief(hours: int = 24, api_key: str = None) -> str:
     """Generate editorial daily brief with Google Search grounding.
-    
+
     Args:
         hours: Look back window for articles (default 24)
         api_key: Gemini API key for editorial brief (uses GEMINI_EDITORIAL_KEY env var if not provided)
-    
+
     Returns:
         Filename of generated post
     """
     # Get API key
     if not api_key:
         api_key = os.getenv("GEMINI_EDITORIAL_KEY")
-    
+
     if not api_key:
         logger.error("editorial_brief: No API key provided (set GEMINI_EDITORIAL_KEY)")
         return ""
-    
+
     # Get articles from state
     articles = get_fetched_articles_since(hours)
-    
+
     if not articles:
         logger.info("editorial_brief: no articles to include in brief")
         return ""
-    
+
     # Sort by timestamp (newest first)
     articles.sort(key=lambda a: a.get("ts", 0), reverse=True)
-    
+
     logger.info(f"editorial_brief: processing {len(articles)} articles from last {hours}h")
-    
+
     # Build article list for prompt
-    article_text = "\n\n".join([
-        f"**{i+1}. {art.get('headline', 'Untitled')}** ({art.get('source_date', 'N/A')})\n" +
-        "\n".join([f"  • {bullet}" for bullet in art.get('bullets', [])])
-        for i, art in enumerate(articles)
-    ])
-    
+    article_text = "\n\n".join(
+        [
+            f"**{i+1}. {art.get('headline', 'Untitled')}** ({art.get('source_date', 'N/A')})\n"
+            + "\n".join([f"  • {bullet}" for bullet in art.get("bullets", [])])
+            for i, art in enumerate(articles)
+        ]
+    )
+
     # Generate date string for post
     now = datetime.datetime.utcnow()
     date_str = now.strftime("%Y-%m-%d")
     display_date = now.strftime("%B %d, %Y")
-    
+
     # Enhanced editorial prompt with grounding
     prompt = f"""You are a senior editor at SHA256 News, a premium Bitcoin mining publication read by mining executives, operators, and institutional investors.
 
@@ -147,74 +150,87 @@ Write the brief now. Use your knowledge to add depth beyond just the mining arti
     try:
         # Configure Gemini client with grounding
         client = genai.Client(api_key=api_key)
-        
-        grounding_tool = types.Tool(
-            google_search=types.GoogleSearch()
-        )
-        
+
+        grounding_tool = types.Tool(google_search=types.GoogleSearch())
+
         config = types.GenerateContentConfig(
             tools=[grounding_tool],
             temperature=0.7,
         )
-        
+
         logger.info("editorial_brief: generating with Google Search grounding...")
-        
+
         # Generate the brief
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp",
             contents=prompt,
             config=config,
         )
-        
+
         brief_content = response.text
-        
+
         # Log grounding metadata if available
-        if hasattr(response, 'candidates') and response.candidates:
+        if hasattr(response, "candidates") and response.candidates:
             candidate = response.candidates[0]
-            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+            if hasattr(candidate, "grounding_metadata") and candidate.grounding_metadata:
                 metadata = candidate.grounding_metadata
-                if hasattr(metadata, 'web_search_queries') and metadata.web_search_queries:
-                    logger.info(f"editorial_brief: executed {len(metadata.web_search_queries)} search queries")
-        
+                if hasattr(metadata, "web_search_queries") and metadata.web_search_queries:
+                    logger.info(
+                        f"editorial_brief: executed {len(metadata.web_search_queries)} search queries"
+                    )
+
     except Exception as e:
         logger.error(f"editorial_brief: generation failed: {e}")
         return ""
-    
+
     # Create post filename
     post_filename = f"{date_str}-editorial-brief.html"
-    
+
     # Generate HTML from markdown
     html = _generate_post_html(brief_content, display_date, len(articles))
-    
+
     # Write to docs/posts/
     posts_dir = pathlib.Path("docs/posts")
     posts_dir.mkdir(parents=True, exist_ok=True)
-    
+
     post_path = posts_dir / post_filename
     post_path.write_text(html, encoding="utf-8")
-    
+
     logger.info(f"editorial_brief: generated {post_filename} with {len(articles)} articles")
-    
+
     # Update posts index
     _update_posts_index(post_filename, display_date, len(articles))
-    
+
     return post_filename
 
 
 def _generate_post_html(markdown_content: str, display_date: str, article_count: int) -> str:
     """Generate HTML for editorial blog post."""
-    
+
     # Simple markdown to HTML conversion (for basic formatting)
     html_content = markdown_content
-    html_content = html_content.replace('\n\n', '</p><p>')
-    html_content = html_content.replace('\n', '<br>')
-    
+    html_content = html_content.replace("\n\n", "</p><p>")
+    html_content = html_content.replace("\n", "<br>")
+
     # Convert headers
     import re
-    html_content = re.sub(r'^# (.+)$', r'<h1 class="font-serif text-3xl sm:text-4xl mb-6">\1</h1>', html_content, flags=re.MULTILINE)
-    html_content = re.sub(r'^## (.+)$', r'<h2 class="font-serif text-2xl mb-4 mt-8">\1</h2>', html_content, flags=re.MULTILINE)
-    html_content = re.sub(r'^\*\*(.+?)\*\*:', r'<strong>\1</strong>:', html_content, flags=re.MULTILINE)
-    
+
+    html_content = re.sub(
+        r"^# (.+)$",
+        r'<h1 class="font-serif text-3xl sm:text-4xl mb-6">\1</h1>',
+        html_content,
+        flags=re.MULTILINE,
+    )
+    html_content = re.sub(
+        r"^## (.+)$",
+        r'<h2 class="font-serif text-2xl mb-4 mt-8">\1</h2>',
+        html_content,
+        flags=re.MULTILINE,
+    )
+    html_content = re.sub(
+        r"^\*\*(.+?)\*\*:", r"<strong>\1</strong>:", html_content, flags=re.MULTILINE
+    )
+
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -264,7 +280,7 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
     """Update posts/index.json with new post metadata."""
     posts_dir = pathlib.Path("docs/posts")
     index_path = posts_dir / "index.json"
-    
+
     # Load existing index
     if index_path.exists():
         try:
@@ -273,17 +289,20 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
             index = {"posts": []}
     else:
         index = {"posts": []}
-    
+
     # Check if already exists
     posts = index.get("posts", [])
     if not any(p.get("filename") == filename for p in posts):
-        posts.insert(0, {
-            "filename": filename,
-            "date": display_date,
-            "article_count": article_count,
-        })
+        posts.insert(
+            0,
+            {
+                "filename": filename,
+                "date": display_date,
+                "article_count": article_count,
+            },
+        )
         index["posts"] = posts
-        
+
         # Save updated index
         index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -291,16 +310,16 @@ def _update_posts_index(filename: str, display_date: str, article_count: int) ->
 if __name__ == "__main__":
     import sys
     from dotenv import load_dotenv
-    
+
     load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    
+
     # Allow custom hours via CLI
     hours = int(sys.argv[1]) if len(sys.argv) > 1 else 24
-    
+
     filename = generate_editorial_brief(hours)
     if filename:
         print(f"Generated: docs/posts/{filename}")

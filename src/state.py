@@ -94,11 +94,17 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     # prune fetched articles (keep 7 days for weekly brief)
     articles: List[Dict] = state.get("fetched_articles") or []
     week_cutoff = _now_ts() - 168 * 3600  # 7 days
-    state["fetched_articles"] = [x for x in articles if isinstance(x, dict) and x.get("ts", 0) >= week_cutoff]
+    state["fetched_articles"] = [
+        x for x in articles if isinstance(x, dict) and x.get("ts", 0) >= week_cutoff
+    ]
 
 
 def already_posted(
-    url: str = "", event_uri: str = "", fingerprint: str = "", article_uri: str = "", window_hours: int = 72
+    url: str = "",
+    event_uri: str = "",
+    fingerprint: str = "",
+    article_uri: str = "",
+    window_hours: int = 72,
 ) -> bool:
     state = _load()
     _prune(state, window_hours)
@@ -126,7 +132,11 @@ def already_posted(
 
 
 def mark_posted(
-    url: str = "", event_uri: str = "", fingerprint: str = "", article_uri: str = "", max_entries: int = 1000
+    url: str = "",
+    event_uri: str = "",
+    fingerprint: str = "",
+    article_uri: str = "",
+    max_entries: int = 1000,
 ) -> None:
     state = _load()
     _prune(state)
@@ -134,7 +144,9 @@ def mark_posted(
     # Track article_uri (primary key from Event Registry)
     if article_uri:
         article_uris = state.get("posted_article_uris") or []
-        if not any(isinstance(a, dict) and a.get("article_uri") == article_uri for a in article_uris):
+        if not any(
+            isinstance(a, dict) and a.get("article_uri") == article_uri for a in article_uris
+        ):
             article_uris.append({"article_uri": article_uri, "ts": now})
             if len(article_uris) > max_entries:
                 article_uris = article_uris[-max_entries:]

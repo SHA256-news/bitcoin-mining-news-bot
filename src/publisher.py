@@ -87,9 +87,7 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
         resp1 = client.create_tweet(text=tweet1, user_auth=True)
         tid1 = str(resp1.data.get("id")) if getattr(resp1, "data", None) else ""
     except tweepy.errors.TooManyRequests:
-        logger.warning(
-            "publisher: rate limit exceeded - skipping post (bot will retry next run)"
-        )
+        logger.warning("publisher: rate limit exceeded - skipping post (bot will retry next run)")
         return "", ""
     except Exception as e:
         logger.error(
