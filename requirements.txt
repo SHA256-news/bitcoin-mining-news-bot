@@ -4,3 +4,4 @@ python-dotenv
 tweepy
 eventregistry
 beautifulsoup4
+google-genai>=1.49.0

@@ -25,6 +25,8 @@ def _default_state() -> Dict:
         "gemini_usage": {"date": "", "counts": {}},
         # cached summaries: list of {fp, ts, headline, bullets}
         "summary_cache": [],
+        # all fetched articles: list of {fp, ts, headline, bullets, url, event_uri, source_title, source_date}
+        "fetched_articles": [],
     }
 
 
@@ -82,6 +84,10 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     # prune summary cache
     cache: List[Dict] = state.get("summary_cache") or []
     state["summary_cache"] = [x for x in cache if isinstance(x, dict) and x.get("ts", 0) >= cutoff]
+    # prune fetched articles (keep 7 days for weekly brief)
+    articles: List[Dict] = state.get("fetched_articles") or []
+    week_cutoff = _now_ts() - 168 * 3600  # 7 days
+    state["fetched_articles"] = [x for x in articles if isinstance(x, dict) and x.get("ts", 0) >= week_cutoff]
 
 
 def already_posted(
@@ -205,3 +211,48 @@ def gemini_remaining(model: str) -> int:
     usage = gemini_counts()
     used = int((usage.get("counts") or {}).get(model, 0))
     return max(0, limit - used)
+
+
+# Fetched articles tracking (all articles, not just posted)
+
+
+def save_fetched_article(
+    fingerprint: str,
+    headline: str,
+    bullets: list[str],
+    url: str,
+    event_uri: str = "",
+    source_title: str = "",
+    source_date: str = "",
+    max_entries: int = 5000,
+) -> None:
+    """Save a fetched article to state for daily brief generation."""
+    state = _load()
+    _prune(state)
+    articles: List[Dict] = state.get("fetched_articles") or []
+    # Check if already exists (by fingerprint)
+    if not any(isinstance(a, dict) and a.get("fp") == fingerprint for a in articles):
+        articles.append(
+            {
+                "fp": fingerprint,
+                "ts": _now_ts(),
+                "headline": headline,
+                "bullets": bullets,
+                "url": url,
+                "event_uri": event_uri,
+                "source_title": source_title,
+                "source_date": source_date,
+            }
+        )
+        if len(articles) > max_entries:
+            articles = articles[-max_entries:]
+        state["fetched_articles"] = articles
+        _save(state)
+
+
+def get_fetched_articles_since(hours: int = 24) -> List[Dict]:
+    """Get all fetched articles from the last N hours."""
+    state = _load()
+    cutoff = _now_ts() - hours * 3600
+    articles: List[Dict] = state.get("fetched_articles") or []
+    return [a for a in articles if isinstance(a, dict) and a.get("ts", 0) >= cutoff]

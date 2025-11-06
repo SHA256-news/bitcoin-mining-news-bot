@@ -6,7 +6,7 @@ from src.news_fetcher import fetch_bitcoin_mining_articles
 from src.summarizer import summarize_for_miners
 from src.formatter import compose_tweet_1, compose_tweet_2, sanitize_summary
 from src.publisher import publish
-from src.state import already_posted, mark_posted
+from src.state import already_posted, mark_posted, save_fetched_article
 
 
 def _init_logging():
@@ -61,6 +61,16 @@ def run():
                 "main: skipping after sanitize (empty bullets) event=%s url=%s", event_uri, url
             )
             continue
+        # Save to fetched_articles for daily brief (regardless of whether posted to Twitter)
+        save_fetched_article(
+            fingerprint=fp,
+            headline=headline2,
+            bullets=bullets2,
+            url=url,
+            event_uri=event_uri,
+            source_title=source_title,
+            source_date=art.get("date", ""),
+        )
         prepared.append(
             {
                 "headline": headline2,

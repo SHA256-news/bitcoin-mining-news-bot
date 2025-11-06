@@ -5,7 +5,7 @@ A bot that fetches Bitcoin mining news from Event Registry, summarizes with Gemi
 - Tweet 1: catchy headline + 3 bullet points (<= 280 chars)
 - Tweet 2: source URL
 
-It runs on GitHub Actions roughly every 90 minutes and will later power a GitHub Pages blog with daily briefs and image selection logic.
+It runs on GitHub Actions roughly every 90 minutes and powers a GitHub Pages blog with daily briefs of all fetched articles.
 
 ## Status
 Initial scaffold evolving toward production: runtime config, retries, dedup, and basic tests/linting.
@@ -53,10 +53,30 @@ It includes concurrency control and caches `.state/` weekly to support URL dedup
 Additional CI (`ci.yml`) runs `ruff`, `black --check`, and `pytest` on pushes/PRs.
 
 ## GitHub Pages
-Pages is scaffolded under `docs/`. Enable Pages to serve from the `docs/` folder on the `main` branch.
+
+### Setup
+1. Enable GitHub Pages in repository settings
+2. Set source to "Deploy from a branch"
+3. Select branch: `main`, folder: `/docs`
+4. Your site will be available at `https://<username>.github.io/<repo-name>/`
+
+### Daily Brief
+The bot generates a daily brief of all fetched articles (regardless of whether they were posted to Twitter). This runs automatically via `.github/workflows/daily-brief.yml` at midnight UTC.
+
+**Manual generation:**
+```bash
+python -m src.daily_brief         # last 24 hours
+python -m src.daily_brief 48      # last 48 hours
+```
+
+The daily brief:
+- Collects all articles fetched in the last 24 hours
+- Generates an HTML blog post in `docs/posts/YYYY-MM-DD-daily-brief.html`
+- Updates `docs/posts/index.json` with post metadata
+- The homepage automatically displays the latest briefs
 
 ## Roadmap
 - Image selection library and logic to attach 2 relevant images
-- Daily blog generation with broader context (energy, politics, etc.)
-- Caching/deduplication and rate-limit handling
-- Unit tests and linting
+- Enhanced blog features (categories, search, RSS feed)
+- Newsletter integration
+- Analytics and engagement tracking
