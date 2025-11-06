@@ -113,18 +113,35 @@ def run():
             publish(t1, t2)
         return
 
-    # Real run: 1-per-execution: post one, queue the rest
+    # Real run: choose the newest non-duplicate candidate first; queue the rest
     from src.queue import push_many, pop_one
 
+    # Strict skip window for posting decision (independent of EVENT_DEDUP_HOURS)
+    post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
+
+    # Filter prepared items for a non-duplicate candidate to post now
+    post_candidates = []
+    for item in prepared:
+        if not already_posted(
+            url=item.get("url", ""),
+            event_uri=item.get("event_uri", ""),
+            fingerprint=item.get("fingerprint", ""),
+            article_uri=item.get("article_uri", ""),
+            window_hours=window_hours,
+            event_window_hours=post_event_skip_hours,
+        ):
+            post_candidates.append(item)
+
     posted = False
-    if prepared:
-        item = prepared[0]
+    if post_candidates:
+        item = post_candidates[0]
         t1 = compose_tweet_1(item["headline"], item["bullets"])
         t2 = compose_tweet_2(item["url"])
         tid1, tid2 = publish(t1, t2)
-        # Always stage the rest of today's items into the queue, newest first
-        if len(prepared) > 1:
-            push_many(list(reversed(prepared[1:])))
+        # Stage ALL prepared items (including the used one) into the queue, newest first, minus the one we just used
+        rest = [x for x in prepared if x is not item]
+        if rest:
+            push_many(list(reversed(rest)))
         if tid1:
             posted = True
             # Only mark as posted on success
@@ -141,8 +158,23 @@ def run():
                 item.get("fingerprint", ""),
                 item.get("url", ""),
             )
+    else:
+        # No fresh candidates found; push all prepared into queue for later
+        if prepared:
+            push_many(list(reversed(prepared)))
+
     if not posted:
+        # Try queue fallback, skipping duplicates within the posting decision window
         q = pop_one()
+        while q and already_posted(
+            url=q.get("url", ""),
+            event_uri=q.get("event_uri", ""),
+            fingerprint=q.get("fingerprint", ""),
+            article_uri=q.get("article_uri", ""),
+            window_hours=window_hours,
+            event_window_hours=post_event_skip_hours,
+        ):
+            q = pop_one()
         if q:
             t1 = compose_tweet_1(q["headline"], q["bullets"])
             t2 = compose_tweet_2(q["url"])
