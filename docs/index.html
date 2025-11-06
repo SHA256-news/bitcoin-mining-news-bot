@@ -77,15 +77,14 @@
               const btcPrice = btcData.bitcoin?.usd;
               const btcChange = btcData.bitcoin?.usd_24h_change;
 
-              // Fetch blockchain stats from Mempool.space (CORS-enabled)
-              const mempoolRes = await fetch('https://mempool.space/api/v1/difficulty-adjustment');
+              // Fetch mining stats from Mempool.space (CORS-enabled)
+              const mempoolRes = await fetch('https://mempool.space/api/v1/mining/hashrate/1d');
               const mempoolData = await mempoolRes.json();
               const difficulty = mempoolData.currentDifficulty;
               const difficultyT = (difficulty / 1e12).toFixed(2);
-
-              // Calculate hashrate from difficulty (blocks are ~10 min = 600s)
-              // hashrate (EH/s) = difficulty * 2^32 / 600 / 1e18
-              const hashrateEH = (difficulty * Math.pow(2, 32) / 600 / 1e18).toFixed(0);
+              
+              // Hashrate in H/s, convert to EH/s
+              const hashrateEH = (mempoolData.currentHashrate / 1e18).toFixed(0);
 
               setMarkets([
                 {
