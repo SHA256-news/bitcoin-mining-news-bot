@@ -83,8 +83,8 @@
               const difficulty = mempoolData.currentDifficulty;
               const difficultyT = (difficulty / 1e12).toFixed(2);
               
-              // Hashrate in H/s, convert to EH/s
-              const hashrateEH = (mempoolData.currentHashrate / 1e18).toFixed(0);
+              // Hashrate in H/s, convert to ZH/s (Zetahash = 1e21)
+              const hashrateZH = (mempoolData.currentHashrate / 1e21).toFixed(2);
               
               // Calculate 24h change from hashrates array (compare current to 24h ago)
               const hashrates = mempoolData.hashrates || [];
@@ -114,7 +114,7 @@
                 },
                 {
                   s: "Network Hashrate",
-                  p: hashrateEH ? `${hashrateEH} EH/s` : "N/A",
+                  p: hashrateZH ? `${hashrateZH} ZH/s` : "N/A",
                   c: hashrateChange !== null ? `${hashrateChange >= 0 ? '+' : ''}${hashrateChange.toFixed(1)}%` : ""
                 },
               ]);
@@ -124,7 +124,7 @@
               setMarkets([
                 { s: "BTC", p: "$95,000", c: "" },
                 { s: "Mining Difficulty", p: "109 T", c: "" },
-                { s: "Network Hashrate", p: "775 EH/s", c: "" },
+                { s: "Network Hashrate", p: "1.11 ZH/s", c: "" },
               ]);
             } finally {
               setLoading(false);
