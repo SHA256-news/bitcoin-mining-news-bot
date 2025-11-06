@@ -374,8 +374,33 @@ def _fingerprint(article: Dict) -> str:
             "out",
         }
     ]
-    # prioritize company/mining terms
+    
+    # Extract company names (common mining companies)
+    company_names = {
+        "hut", "cleanspark", "riot", "marathon", "cipher", "iris", "bitfarms",
+        "canaan", "bitmain", "microbt", "core", "scientific", "argo", "terawulf",
+        "stronghold", "greenidge", "bitdeer", "cango", "alps"
+    }
+    companies = [t for t in tokens if t in company_names]
+    
+    # Extract topic indicators (earnings, expansion, etc)
+    topic_indicators = {
+        "earnings", "revenue", "q1", "q2", "q3", "q4", "quarter", "quarterly",
+        "expansion", "capacity", "hashrate", "acquisition", "merger", "ipo",
+        "holdings", "treasury", "reserve", "liquidation", "sale", "pivot"
+    }
+    topics = [t for t in tokens if t in topic_indicators]
+    
+    # prioritize company + topic combination for better duplicate detection
     keep = []
+    
+    # Add companies first (most important for dedup)
+    keep.extend(companies[:3])
+    
+    # Add topic indicators
+    keep.extend(topics[:3])
+    
+    # Add priority mining terms
     for t in tokens:
         if t in {
             "bitcoin",
@@ -385,23 +410,22 @@ def _fingerprint(article: Dict) -> str:
             "hashrate",
             "difficulty",
             "asic",
-            "reserve",
-            "treasury",
-            "expansion",
-            "capacity",
         }:
             keep.append(t)
-    # add first few significant tokens (increased from 8 to 12 for better uniqueness)
-    keep += tokens[:12]
-    # add numbers/units
-    keep += _numbers_and_units(f"{title} {text}")
+    
+    # add first few significant tokens (but fewer now since we have companies/topics)
+    keep += tokens[:8]
+    
+    # add key numbers/units (fewer to reduce noise)
+    keep += _numbers_and_units(f"{title} {text}")[:5]
+    
     # dedupe and join
     seen = []
     for k in keep:
         if k not in seen:
             seen.append(k)
-    # Increased from 20 to 25 tokens for more stable fingerprints
-    fp = " ".join(seen[:25]).strip()
+    # Use 20 tokens (better balance between uniqueness and similarity detection)
+    fp = " ".join(seen[:20]).strip()
     return fp
 
 
@@ -521,6 +545,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     "text": a.get("body") or a.get("text") or "",
                     "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
                     "article_uri": uri,
+                    "date": a.get("date") or a.get("dateTime") or "",
                     "source": (
                         (a.get("source") or {}).get("title")
                         if isinstance(a.get("source"), dict)
@@ -566,14 +591,13 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     # compute fingerprint once text is final
                     art["fingerprint"] = _fingerprint(art)
                     articles.append(art)
-            # Deduplicate by eventUri if present, otherwise by fingerprint, else by normalized title signature
+            # Deduplicate by fingerprint first (most specific), with event_uri as secondary grouping
+            # This allows multiple articles per event if they have different fingerprints
             grouped: Dict[str, List[Dict]] = {}
             for art in articles:
-                key = (
-                    art.get("event_uri")
-                    or art.get("fingerprint")
-                    or _signature(art.get("title", ""))
-                )
+                fp = art.get("fingerprint", "")
+                # Use fingerprint as primary key; only fall back to event_uri if no fingerprint
+                key = fp if fp else (art.get("event_uri") or _signature(art.get("title", "")))
                 grouped.setdefault(key, []).append(art)
             picked = []
             for key, group in grouped.items():
@@ -598,6 +622,11 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             avg_sentiment,
             trending.get("is_spike", False),
         )
+        
+        # Log dates of picked articles for debugging freshness
+        if picked:
+            dates = [a.get("date", "unknown") for a in picked]
+            logger.info("news_fetcher: picked article dates: %s", dates)
         
         # Add metadata to picked articles
         for art in picked:
