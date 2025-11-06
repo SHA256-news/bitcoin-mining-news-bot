@@ -85,6 +85,21 @@
               
               // Hashrate in H/s, convert to EH/s
               const hashrateEH = (mempoolData.currentHashrate / 1e18).toFixed(0);
+              
+              // Calculate 24h change from hashrates array (compare current to 24h ago)
+              const hashrates = mempoolData.hashrates || [];
+              const now = Date.now() / 1000;
+              const dayAgo = now - 86400;
+              const dayAgoHashrate = hashrates.find(h => h.timestamp >= dayAgo && h.timestamp <= dayAgo + 3600);
+              const hashrateChange = dayAgoHashrate && dayAgoHashrate.avgHashrate > 0
+                ? ((mempoolData.currentHashrate - dayAgoHashrate.avgHashrate) / dayAgoHashrate.avgHashrate * 100)
+                : null;
+              
+              // Get difficulty change from difficulty array
+              const difficulties = mempoolData.difficulty || [];
+              const diffChange = difficulties.length >= 2 
+                ? ((difficulties[difficulties.length - 1].difficulty - difficulties[difficulties.length - 2].difficulty) / difficulties[difficulties.length - 2].difficulty * 100)
+                : null;
 
               setMarkets([
                 {
@@ -95,12 +110,12 @@
                 {
                   s: "Mining Difficulty",
                   p: difficulty ? `${difficultyT} T` : "N/A",
-                  c: ""
+                  c: diffChange !== null ? `${diffChange >= 0 ? '+' : ''}${diffChange.toFixed(1)}%` : ""
                 },
                 {
                   s: "Network Hashrate",
                   p: hashrateEH ? `${hashrateEH} EH/s` : "N/A",
-                  c: ""
+                  c: hashrateChange !== null ? `${hashrateChange >= 0 ? '+' : ''}${hashrateChange.toFixed(1)}%` : ""
                 },
               ]);
             } catch (e) {
