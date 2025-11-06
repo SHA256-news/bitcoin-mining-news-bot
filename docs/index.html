@@ -212,12 +212,17 @@
 
       function Newsletter() {
         return (
-          <section className="border border-zinc-800 bg-zinc-900 p-6 text-center">
-            <h3 className="font-serif text-xl">Stay Updated</h3>
-            <p className="mt-1 text-sm text-zinc-400">Get early Bitcoin mining news in your inbox.</p>
-            <form className="mt-3 flex flex-col sm:flex-row gap-2 justify-center" onSubmit={(e) => e.preventDefault()}>
-              <input type="email" placeholder="you@company.com" className="w-full sm:w-64 border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder:text-zinc-500 focus:outline-none focus:ring-0" />
-              <button className="border border-zinc-100 px-4 py-2 text-sm font-semibold">Subscribe</button>
+          <section className="border border-zinc-800 bg-zinc-900 p-8 text-center rounded-lg">
+            <h3 className="font-serif text-2xl mb-2">Never Miss a Block</h3>
+            <p className="text-base text-zinc-300 mb-1">Get the day's top Bitcoin mining news delivered to your inbox.</p>
+            <p className="text-sm text-zinc-400 mb-6">Daily brief • Zero spam • Unsubscribe anytime</p>
+            <form className="flex flex-col sm:flex-row gap-2 justify-center max-w-md mx-auto" onSubmit={(e) => e.preventDefault()}>
+              <input 
+                type="email" 
+                placeholder="miner@yourfarm.com" 
+                className="flex-1 border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 rounded" 
+              />
+              <button className="bg-emerald-500 hover:bg-emerald-600 text-zinc-950 px-6 py-3 text-sm font-semibold rounded transition">Get Daily Brief</button>
             </form>
           </section>
         );
