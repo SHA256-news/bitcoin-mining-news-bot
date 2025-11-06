@@ -45,13 +45,6 @@
         time: "Updated 1 hour ago",
       };
 
-      const markets = [
-        { s: "Hashprice", p: "$72.10/PH/s/day", c: "−1.2%" },
-        { s: "BTC", p: "$63,842", c: "+0.4%" },
-        { s: "Mining Difficulty", p: "82.1 T", c: "+0.9%" },
-        { s: "Energy Index", p: "$54.20/MWh", c: "−0.5%" },
-      ];
-
       function Masthead() {
         return (
           <header className="border-b border-zinc-800">
@@ -68,6 +61,63 @@
       }
 
       function MarketsStrip() {
+        const [markets, setMarkets] = useState([
+          { s: "BTC", p: "Loading...", c: "" },
+          { s: "Mining Difficulty", p: "Loading...", c: "" },
+          { s: "Network Hashrate", p: "Loading...", c: "" },
+        ]);
+        const [loading, setLoading] = useState(true);
+
+        useEffect(() => {
+          async function fetchMarketData() {
+            try {
+              // Fetch BTC price from CoinGecko (free, no API key)
+              const btcRes = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true');
+              const btcData = await btcRes.json();
+              const btcPrice = btcData.bitcoin?.usd;
+              const btcChange = btcData.bitcoin?.usd_24h_change;
+
+              // Fetch difficulty from Blockchain.info (free, no API key)
+              const diffRes = await fetch('https://blockchain.info/q/getdifficulty');
+              const difficulty = await diffRes.text();
+              const difficultyT = (parseFloat(difficulty) / 1e12).toFixed(2);
+
+              // Fetch hashrate from Blockchain.info (returns in TH/s)
+              const hashRes = await fetch('https://blockchain.info/q/hashrate');
+              const hashrate = await hashRes.text();
+              const hashrateEH = (parseFloat(hashrate) / 1e6).toFixed(0); // Convert TH/s to EH/s
+
+              setMarkets([
+                {
+                  s: "BTC",
+                  p: btcPrice ? `$${btcPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : "N/A",
+                  c: btcChange ? `${btcChange >= 0 ? '+' : ''}${btcChange.toFixed(1)}%` : ""
+                },
+                {
+                  s: "Mining Difficulty",
+                  p: difficulty ? `${difficultyT} T` : "N/A",
+                  c: ""
+                },
+                {
+                  s: "Network Hashrate",
+                  p: hashrate ? `${hashrateEH} EH/s` : "N/A",
+                  c: ""
+                },
+              ]);
+            } catch (e) {
+              console.error('Error fetching market data:', e);
+              setMarkets([
+                { s: "BTC", p: "Error", c: "" },
+                { s: "Mining Difficulty", p: "Error", c: "" },
+                { s: "Network Hashrate", p: "Error", c: "" },
+              ]);
+            } finally {
+              setLoading(false);
+            }
+          }
+          fetchMarketData();
+        }, []);
+
         return (
           <div className="border-b border-zinc-800 bg-zinc-950">
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -76,7 +126,9 @@
                   <div key={i} className="flex items-baseline gap-2">
                     <span className="font-semibold">{m.s}</span>
                     <span className="tabular-nums">{m.p}</span>
-                    <span className={`tabular-nums ${m.c.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>{m.c}</span>
+                    {m.c && (
+                      <span className={`tabular-nums ${m.c.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>{m.c}</span>
+                    )}
                   </div>
                 ))}
               </div>
