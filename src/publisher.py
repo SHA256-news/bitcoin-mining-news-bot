@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import Tuple
 
 try:
@@ -36,7 +37,7 @@ def _client():
             consumer_secret=x_api_secret,
             access_token=x_access_token,
             access_token_secret=x_access_token_secret,
-            wait_on_rate_limit=False,  # Don't sleep on rate limits - fail fast instead
+            wait_on_rate_limit=False,  # We'll handle limited, single retry ourselves
         )
         logger.info(
             "publisher: initialized Tweepy Client for v2 create_tweet (OAuth 1.0a user context)"
@@ -62,6 +63,47 @@ def _extract_error_detail(exc: Exception) -> str:
     return str(exc)
 
 
+def _rate_limit_wait_seconds(exc: Exception) -> float:
+    """Best-effort parse of rate limit reset; fallback to env seconds."""
+    try:
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            reset = resp.headers.get("x-rate-limit-reset")
+            if reset:
+                try:
+                    # Header is epoch seconds; add small buffer
+                    wait_s = float(reset) - time.time() + 2.0
+                    return max(5.0, min(wait_s, float(os.getenv("X_RATE_RETRY_MAX", "180"))))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return float(os.getenv("X_RATE_RETRY_SECONDS", "75"))
+
+
+def _maybe_retry_rate_limited(client, create_kwargs) -> Tuple[str, str]:
+    """Try create_tweet with one retry on rate limit. Returns (id, err)."""
+    try:
+        resp = client.create_tweet(**create_kwargs)
+        tid = str(resp.data.get("id")) if getattr(resp, "data", None) else ""
+        return tid, ""
+    except tweepy.errors.TooManyRequests as e:
+        if not _truthy(os.getenv("RETRY_ON_X_RATELIMIT", "1")):
+            logger.warning("publisher: rate limit exceeded - no retry")
+            return "", _extract_error_detail(e)
+        wait_s = _rate_limit_wait_seconds(e)
+        logger.warning("publisher: rate limit; retrying once after %.1fs", wait_s)
+        time.sleep(wait_s)
+        try:
+            resp = client.create_tweet(**create_kwargs)
+            tid = str(resp.data.get("id")) if getattr(resp, "data", None) else ""
+            return tid, ""
+        except Exception as e2:
+            return "", _extract_error_detail(e2)
+    except Exception as e:
+        return "", _extract_error_detail(e)
+
+
 def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     """
     Publish two tweets (thread) via X API v2. Returns (id1, id2) or prints when not configured.
@@ -82,30 +124,17 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     except Exception as e:
         logger.warning("publisher: get_me failed (continuing): %s", _extract_error_detail(e))
 
-    # First tweet
-    try:
-        resp1 = client.create_tweet(text=tweet1, user_auth=True)
-        tid1 = str(resp1.data.get("id")) if getattr(resp1, "data", None) else ""
-    except tweepy.errors.TooManyRequests:
-        logger.warning("publisher: rate limit exceeded - skipping post (bot will retry next run)")
-        return "", ""
-    except Exception as e:
-        logger.error(
-            "publisher: failed to create first tweet (v2 /2/tweets): %s", _extract_error_detail(e)
-        )
+    # First tweet (with single retry on rate limit)
+    tid1, err = _maybe_retry_rate_limited(client, {"text": tweet1, "user_auth": True})
+    if not tid1:
+        logger.warning("publisher: failed to create first tweet: %s", err or "unknown error")
         return "", ""
 
-    # Reply with second tweet (URL)
-    try:
-        resp2 = client.create_tweet(
-            text=tweet2, in_reply_to_tweet_id=tid1 if tid1 else None, user_auth=True
-        )
-        tid2 = str(resp2.data.get("id")) if getattr(resp2, "data", None) else ""
-    except tweepy.errors.TooManyRequests:
-        logger.warning("publisher: rate limit exceeded on reply tweet - thread incomplete")
-        tid2 = ""
-    except Exception as e:
-        logger.error("publisher: failed to create reply tweet: %s", _extract_error_detail(e))
-        tid2 = ""
+    # Reply with second tweet (URL) (also retry once on rate limit)
+    tid2, err2 = _maybe_retry_rate_limited(
+        client, {"text": tweet2, "in_reply_to_tweet_id": tid1, "user_auth": True}
+    )
+    if err2:
+        logger.warning("publisher: failed to create reply tweet: %s", err2)
 
     return tid1, tid2
