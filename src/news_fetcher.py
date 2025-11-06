@@ -63,7 +63,7 @@ def _extract_main_text(html: str) -> str:
 def _is_btc_sha256_article(article: Dict) -> bool:
     """Return True if article is Bitcoin-only SHA-256 mining related.
     Rules:
-    - Must mention bitcoin or btc AND at least one of: sha-256/sha256/asic/hashrate/difficulty.
+    - Must mention bitcoin or btc AND one of: mining/miner/sha-256/sha256/asic/hashrate/difficulty.
     - Must NOT mention: cloud mining, ethereum/eth, litecoin/ltc, dogecoin, gpu.
     """
     title = (article.get("title") or "").lower()
@@ -73,7 +73,16 @@ def _is_btc_sha256_article(article: Dict) -> bool:
     if not ("bitcoin" in blob or " btc" in blob or "btc " in blob):
         return False
 
-    include_tokens = ["sha-256", "sha256", "asic", "hashrate", "difficulty"]
+    include_tokens = [
+        "mining",
+        "miner",
+        "miners",
+        "sha-256",
+        "sha256",
+        "asic",
+        "hashrate",
+        "difficulty",
+    ]
     if not any(tok in blob for tok in include_tokens):
         return False
 
@@ -103,12 +112,16 @@ def _parse_list_env(name: str) -> list[str]:
 
 
 # Preferred domains first (lower index = higher preference). Extendable via env.
+# Includes user-specified preferences at the top by default; can be overridden via SOURCE_DOMAIN_ALLOWLIST
 DOMAIN_PREF_ORDER = [
+    # User-preferred
+    "wsj.com",  # The Wall Street Journal
+    "ft.com",  # The Financial Times
+    "blockspace.media",
+    "beincrypto.com",
     # General tier-1
     "bloomberg.com",
     "reuters.com",
-    "wsj.com",
-    "ft.com",
     # Bitcoin/mining specialist
     "coindesk.com",
     "theblock.co",
@@ -125,7 +138,6 @@ DOMAIN_DENY = [
     "coinmarketcap.com",
     "crypto.news",
     "streetinsider.com",
-    "finance.yahoo.com",
     "seekingalpha.com",
     "benzinga.com",
     "ambcrypto.com",
@@ -160,6 +172,28 @@ BANNED_KEYWORDS = {
     "tokenization",
 } | set(_parse_list_env("SOURCE_BANNED_KEYWORDS"))
 
+
+def _is_eth_domain(host: str) -> bool:
+    """Return True if the host clearly references Ethereum (eth/ethereum) in its domain name.
+
+    Rules (conservative to avoid false positives like health.com or bethesda.org):
+    - Any label equals "eth" (e.g., eth.link, eth.example.com)
+    - The registrable domain contains "ethereum" anywhere
+    - The left-most label starts with "eth" (e.g., etherscan.io, ethnews.com)
+    """
+    if not host:
+        return False
+    h = host.lower()
+    labels = [p for p in h.split(".") if p]
+    if "ethereum" in h:
+        return True
+    if any(lbl == "eth" for lbl in labels):
+        return True
+    if labels and labels[0].startswith("eth"):
+        return True
+    return False
+
+
 NEG_ENV_TOKENS = {
     "carbon footprint",
     "carbon emissions",
@@ -191,7 +225,7 @@ def _domain_score(u: str) -> int:
     try:
         host = _domain(urlparse(u).netloc)
         # Absolute ban
-        if host in BANNED_DOMAINS:
+        if host in BANNED_DOMAINS or _is_eth_domain(host):
             return 1_000_000
         # Hard penalty for denylist
         if host in DOMAIN_DENY:
@@ -622,8 +656,8 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                 sponsored_url = "/sponsored/" in url_str.lower() or "sponsored" in url_str.lower()
                 if (
                     host in BANNED_DOMAINS
+                    or _is_eth_domain(host)
                     or any(k in blob for k in BANNED_KEYWORDS)
-                    or any(k in blob for k in NEG_ENV_TOKENS)
                     or sponsored_url
                     or any(k in blob for k in SPONSORED_TOKENS)
                 ):

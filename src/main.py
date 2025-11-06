@@ -25,8 +25,9 @@ def run():
     _init_logging()
     logger = logging.getLogger("main")
 
-    limit_str = os.getenv("ARTICLES_LIMIT", "1").strip()
-    limit = int(limit_str) if limit_str else 1
+    # Default to 5 to ensure we consider multiple candidates per run
+    limit_str = os.getenv("ARTICLES_LIMIT", "5").strip()
+    limit = int(limit_str) if limit_str else 5
     query = os.getenv("TOPIC_QUERY", "bitcoin mining")
     dry_run = _truthy(os.getenv("DRY_RUN"))
 
@@ -39,19 +40,30 @@ def run():
 
     articles = (fetch_bitcoin_mining_articles(limit=limit, query=query) or [])[:budget_cap]
     prepared = []
+    # Configurable de-dup windows
+    window_hours = int(os.getenv("DEDUP_WINDOW_HOURS", "72") or "72")
+    event_window_hours = os.getenv("EVENT_DEDUP_HOURS")
+    event_window_hours = (
+        int(event_window_hours) if (event_window_hours or "").strip().isdigit() else window_hours
+    )
+
     for art in articles:
         url = art.get("url", "")
         event_uri = art.get("event_uri", "")
         article_uri = art.get("article_uri", "")
         fp = art.get("fingerprint", "")
         source_title = art.get("title", "")
-        # Bypass dedup if DRY_RUN, otherwise enforce 72h dedup
+        # Bypass dedup if DRY_RUN, otherwise enforce configured windows
         if not dry_run and already_posted(
-            url=url, event_uri=event_uri, fingerprint=fp, article_uri=article_uri, window_hours=72
+            url=url,
+            event_uri=event_uri,
+            fingerprint=fp,
+            article_uri=article_uri,
+            window_hours=window_hours,
+            event_window_hours=event_window_hours,
         ):
             logger.info(
-                "main: skipping already-posted article_uri=%s event=%s url=%s",
-                article_uri,
+                "main: skipping already-posted article event=%s url=%s",
                 event_uri,
                 url,
             )
@@ -90,6 +102,11 @@ def run():
 
     # DRY_RUN: preview all threads
     if dry_run:
+        # Stage prepared items into the queue so a subsequent real run can post the newest first
+        if prepared:
+            from src.queue import push_many
+
+            push_many(list(reversed(prepared)))
         for item in prepared:
             t1 = compose_tweet_1(item["headline"], item["bullets"])
             t2 = compose_tweet_2(item["url"])
@@ -105,10 +122,11 @@ def run():
         t1 = compose_tweet_1(item["headline"], item["bullets"])
         t2 = compose_tweet_2(item["url"])
         tid1, tid2 = publish(t1, t2)
+        # Always stage the rest of today's items into the queue, newest first
+        if len(prepared) > 1:
+            push_many(list(reversed(prepared[1:])))
         if tid1:
             posted = True
-            if len(prepared) > 1:
-                push_many(prepared[1:])
         else:
             logger.warning(
                 "main: publish failed event=%s fp=%s url=%s",

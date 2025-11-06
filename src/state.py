@@ -105,29 +105,48 @@ def already_posted(
     fingerprint: str = "",
     article_uri: str = "",
     window_hours: int = 72,
+    event_window_hours: int | None = None,
 ) -> bool:
+    """Return True if we've posted this item recently.
+
+    window_hours controls URL/fingerprint/article de-dup window.
+    event_window_hours controls event-level de-dup (None => use window_hours).
+    """
     state = _load()
-    _prune(state, window_hours)
+    # Prune with the max window to ensure we keep enough entries for both windows
+    _prune(state, max(window_hours, event_window_hours or window_hours))
+
     # Check article_uri FIRST (most reliable from Event Registry)
     if article_uri:
         for a in state.get("posted_article_uris") or []:
             if isinstance(a, dict) and a.get("article_uri") == article_uri:
                 return True
-    # Check recent events within window
+
+    # Check recent events with separate window if provided
     if event_uri:
+        cutoff_event = _now_ts() - (event_window_hours or window_hours) * 3600
         for e in state.get("posted_events") or []:
-            if isinstance(e, dict) and e.get("event") == event_uri:
+            if (
+                isinstance(e, dict)
+                and e.get("event") == event_uri
+                and int(e.get("ts", 0)) >= cutoff_event
+            ):
                 return True
+
     # Check recent fingerprints within window
     if fingerprint:
+        cutoff = _now_ts() - window_hours * 3600
         for x in state.get("posted_fingerprints") or []:
-            if isinstance(x, dict) and x.get("fp") == fingerprint:
+            if isinstance(x, dict) and x.get("fp") == fingerprint and int(x.get("ts", 0)) >= cutoff:
                 return True
+
     # Check recent urls within window
     if url:
+        cutoff = _now_ts() - window_hours * 3600
         for u in state.get("posted_urls") or []:
-            if isinstance(u, dict) and u.get("url") == url:
+            if isinstance(u, dict) and u.get("url") == url and int(u.get("ts", 0)) >= cutoff:
                 return True
+
     return False
 
 
