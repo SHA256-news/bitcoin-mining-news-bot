@@ -36,7 +36,7 @@ def _client():
             consumer_secret=x_api_secret,
             access_token=x_access_token,
             access_token_secret=x_access_token_secret,
-            wait_on_rate_limit=True,
+            wait_on_rate_limit=False,  # Don't sleep on rate limits - fail fast instead
         )
         logger.info(
             "publisher: initialized Tweepy Client for v2 create_tweet (OAuth 1.0a user context)"
@@ -86,6 +86,11 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     try:
         resp1 = client.create_tweet(text=tweet1, user_auth=True)
         tid1 = str(resp1.data.get("id")) if getattr(resp1, "data", None) else ""
+    except tweepy.errors.TooManyRequests as e:
+        logger.warning(
+            "publisher: rate limit exceeded - skipping post (bot will retry next run)"
+        )
+        return "", ""
     except Exception as e:
         logger.error(
             "publisher: failed to create first tweet (v2 /2/tweets): %s", _extract_error_detail(e)
@@ -98,6 +103,9 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
             text=tweet2, in_reply_to_tweet_id=tid1 if tid1 else None, user_auth=True
         )
         tid2 = str(resp2.data.get("id")) if getattr(resp2, "data", None) else ""
+    except tweepy.errors.TooManyRequests as e:
+        logger.warning("publisher: rate limit exceeded on reply tweet - thread incomplete")
+        tid2 = ""
     except Exception as e:
         logger.error("publisher: failed to create reply tweet: %s", _extract_error_detail(e))
         tid2 = ""
