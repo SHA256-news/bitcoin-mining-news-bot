@@ -1,7 +1,6 @@
 import sys
 import os
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -11,7 +10,6 @@ from src.news_fetcher import (
     _get_trending_score,
     _fetch_events_first,
     fetch_bitcoin_mining_articles,
-    _domain_score,
 )
 
 
@@ -307,7 +305,7 @@ class TestFetchEventsFirst:
         mock_session_instance.get.return_value = mock_response
         mock_session.return_value = mock_session_instance
         
-        result = _fetch_events_first("test_api_key", "bitcoin mining", [])
+        _fetch_events_first("test_api_key", "bitcoin mining", [])
         
         # Verify keyword was used instead of conceptUri
         call_args = mock_session_instance.get.call_args

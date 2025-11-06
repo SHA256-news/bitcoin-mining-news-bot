@@ -86,7 +86,7 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     try:
         resp1 = client.create_tweet(text=tweet1, user_auth=True)
         tid1 = str(resp1.data.get("id")) if getattr(resp1, "data", None) else ""
-    except tweepy.errors.TooManyRequests as e:
+    except tweepy.errors.TooManyRequests:
         logger.warning(
             "publisher: rate limit exceeded - skipping post (bot will retry next run)"
         )
@@ -103,7 +103,7 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
             text=tweet2, in_reply_to_tweet_id=tid1 if tid1 else None, user_auth=True
         )
         tid2 = str(resp2.data.get("id")) if getattr(resp2, "data", None) else ""
-    except tweepy.errors.TooManyRequests as e:
+    except tweepy.errors.TooManyRequests:
         logger.warning("publisher: rate limit exceeded on reply tweet - thread incomplete")
         tid2 = ""
     except Exception as e:
