@@ -25,8 +25,8 @@ def run():
     _init_logging()
     logger = logging.getLogger("main")
 
-    limit_str = os.getenv("ARTICLES_LIMIT", "5").strip()
-    limit = int(limit_str) if limit_str else 5
+    limit_str = os.getenv("ARTICLES_LIMIT", "1").strip()
+    limit = int(limit_str) if limit_str else 1
     query = os.getenv("TOPIC_QUERY", "bitcoin mining")
     dry_run = _truthy(os.getenv("DRY_RUN"))
 
