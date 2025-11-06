@@ -210,20 +210,6 @@
         );
       }
 
-      function ComingSoon() {
-        const sections = ["Mining Ops", "Hardware", "Energy", "Policy", "Opinion"];
-        return (
-          <section className="space-y-4">
-            <h2 className="text-xl font-serif border-b border-zinc-800 pb-2">Coverage Coming Soon</h2>
-            <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm text-zinc-400">
-              {sections.map((s) => (
-                <li key={s} className="border border-zinc-800 p-2 text-center rounded-md">{s}</li>
-              ))}
-            </ul>
-          </section>
-        );
-      }
-
       function Newsletter() {
         return (
           <section className="border border-zinc-800 bg-zinc-900 p-6 text-center">
@@ -253,7 +239,6 @@
             <main className="flex-1 mx-auto w-full max-w-3xl px-4 sm:px-6 lg:px-8 py-12 space-y-16">
               <DailyBriefs />
               <LatestHeadlinesWidget />
-              <ComingSoon />
               <Newsletter />
             </main>
             <Footer />
