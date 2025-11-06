@@ -24,11 +24,20 @@ GENERIC_BULLETS = {
 
 
 def _heuristic_bullets(title: str, text: str) -> list[str]:
-    # Very simple miner-focused extraction
+    # Very simple miner-focused extraction that NEVER loops forever, even with empty input
     import re
 
-    blob = f"{title}. {text}"
-    sentences = re.split(r"(?<=[.!?])\s+", blob)[:20]
+    blob = " ".join([t.strip() for t in [title or "", text or ""] if t])
+    # Split into sentences; filter out empties and de-duplicate order-preserving
+    raw_sentences = re.split(r"(?<=[.!?])\s+", blob) if blob else []
+    seen: set[str] = set()
+    sentences = []
+    for s in raw_sentences[:20]:
+        ss = s.strip()
+        if ss and ss not in seen:
+            seen.add(ss)
+            sentences.append(ss)
+
     picks: list[str] = []
     themes = [
         ("hashrate", ["hashrate", "eh/s", "zh/s", "th/s"]),
@@ -40,18 +49,33 @@ def _heuristic_bullets(title: str, text: str) -> list[str]:
     ]
     for _, keys in themes:
         for s in sentences:
-            if any(k in s.lower() for k in keys) and len(s.strip()) > 0:
-                picks.append(s.strip())
+            if any(k in s.lower() for k in keys):
+                picks.append(s)
                 break
         if len(picks) >= 3:
             break
-    # pad if needed
-    while len(picks) < 3:
+
+    # Pad safely without infinite looping
+    if len(picks) < 3:
         for s in sentences:
-            if s.strip() and s.strip() not in picks:
-                picks.append(s.strip())
-                if len(picks) >= 3:
-                    break
+            if s not in picks:
+                picks.append(s)
+            if len(picks) >= 3:
+                break
+
+    # If still short, synthesize compact generic-but-informative bullets from available text
+    if len(picks) < 3:
+        base = (title or text or "Bitcoin mining update").strip() or "Bitcoin mining update"
+        # Create up to remaining bullets by chunking words
+        words = re.findall(r"\w+", base)
+        if words:
+            chunk = max(3, min(10, len(words)))
+            while len(picks) < 3 and words:
+                picks.append(" ".join(words[:chunk]).strip())
+                words = words[chunk:]
+        while len(picks) < 3:
+            picks.append("Update for miners")
+
     # shorten bullets
     return [p[:180] for p in picks[:3]]
 
