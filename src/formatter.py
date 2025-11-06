@@ -30,14 +30,22 @@ def sanitize_summary(
         ht = set(_tokens(head))
         st = set(_tokens(source_title))
         overlap = len(ht & st)
-        if ht and overlap / max(1, len(ht)) > 0.6:
+        ratio = (overlap / max(1, len(ht))) if ht else 0.0
+        if ht and ratio > 0.6:
+            # Try a conservative rewrite: keep readability; avoid aggressive token stripping
             cleaned = [
                 t
                 for t in head.split()
                 if t.lower() not in st and t.lower() not in {"the", "a", "an"}
             ]
-            head = ("For Bitcoin miners: " + " ".join(cleaned)).strip()
-            head = head[:80]
+            candidate = " ".join(cleaned).strip()
+            # If the aggressive removal degrades readability, fall back to a clear prefix
+            words = candidate.split()
+            if len(candidate) < 24 or len(words) < 4:
+                # Prefer a stable, human-readable prefix
+                prefix = "Bitcoin mining: "
+                candidate = (prefix + head).strip()
+            head = candidate[:80]
 
     # Exact phrases and numbers to avoid in bullets
     headline_l = head.lower()
