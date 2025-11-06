@@ -43,7 +43,8 @@ jobs:
         run: echo "CACHE_WEEK=$(date +%G-W%V)" >> $GITHUB_ENV
 
       - name: Restore state cache
-        uses: actions/cache@v4
+        id: cache-state
+        uses: actions/cache/restore@v4
         with:
           path: .state
           key: news-bot-state-${{ env.CACHE_WEEK }}
@@ -67,3 +68,10 @@ jobs:
       - name: Run bot
         run: |
           python -m src.main
+
+      - name: Save state cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .state
+          key: news-bot-state-${{ env.CACHE_WEEK }}
