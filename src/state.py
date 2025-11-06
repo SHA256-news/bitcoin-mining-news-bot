@@ -21,6 +21,8 @@ def _default_state() -> Dict:
         "posted_events": [],
         # list of {"fp": str, "ts": int}
         "posted_fingerprints": [],
+        # list of {"article_uri": str, "ts": int} - Event Registry article URIs (primary dedup key)
+        "posted_article_uris": [],
         # daily usage counts
         "gemini_usage": {"date": "", "counts": {}},
         # cached summaries: list of {fp, ts, headline, bullets}
@@ -81,6 +83,11 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
                 new_evs.append({"event": str(e.get("event")), "ts": ts})
         # legacy string entries are considered old and are dropped
     state["posted_events"] = new_evs
+    # prune posted_article_uris
+    article_uris = state.get("posted_article_uris") or []
+    state["posted_article_uris"] = [
+        x for x in article_uris if isinstance(x, dict) and x.get("ts", 0) >= cutoff
+    ]
     # prune summary cache
     cache: List[Dict] = state.get("summary_cache") or []
     state["summary_cache"] = [x for x in cache if isinstance(x, dict) and x.get("ts", 0) >= cutoff]
@@ -91,10 +98,15 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
 
 
 def already_posted(
-    url: str = "", event_uri: str = "", fingerprint: str = "", window_hours: int = 72
+    url: str = "", event_uri: str = "", fingerprint: str = "", article_uri: str = "", window_hours: int = 72
 ) -> bool:
     state = _load()
     _prune(state, window_hours)
+    # Check article_uri FIRST (most reliable from Event Registry)
+    if article_uri:
+        for a in state.get("posted_article_uris") or []:
+            if isinstance(a, dict) and a.get("article_uri") == article_uri:
+                return True
     # Check recent events within window
     if event_uri:
         for e in state.get("posted_events") or []:
@@ -114,11 +126,19 @@ def already_posted(
 
 
 def mark_posted(
-    url: str = "", event_uri: str = "", fingerprint: str = "", max_entries: int = 1000
+    url: str = "", event_uri: str = "", fingerprint: str = "", article_uri: str = "", max_entries: int = 1000
 ) -> None:
     state = _load()
     _prune(state)
     now = _now_ts()
+    # Track article_uri (primary key from Event Registry)
+    if article_uri:
+        article_uris = state.get("posted_article_uris") or []
+        if not any(isinstance(a, dict) and a.get("article_uri") == article_uri for a in article_uris):
+            article_uris.append({"article_uri": article_uri, "ts": now})
+            if len(article_uris) > max_entries:
+                article_uris = article_uris[-max_entries:]
+            state["posted_article_uris"] = article_uris
     if url:
         urls = state.get("posted_urls") or []
         # avoid duplicates

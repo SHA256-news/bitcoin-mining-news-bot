@@ -353,6 +353,8 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
         "lang": "eng",
         # Ask Event Registry to return full article body when possible
         "articleBodyLen": -1,
+        # Skip duplicate articles at API level
+        "isDuplicateFilter": "skipDuplicates",
     }
     url = "https://eventregistry.org/api/v1/article/getArticles"
     try:

@@ -42,13 +42,14 @@ def run():
     for art in articles:
         url = art.get("url", "")
         event_uri = art.get("event_uri", "")
+        article_uri = art.get("article_uri", "")
         fp = art.get("fingerprint", "")
         source_title = art.get("title", "")
         # Bypass dedup if DRY_RUN, otherwise enforce 72h dedup
         if not dry_run and already_posted(
-            url=url, event_uri=event_uri, fingerprint=fp, window_hours=72
+            url=url, event_uri=event_uri, fingerprint=fp, article_uri=article_uri, window_hours=72
         ):
-            logger.info("main: skipping already-posted event=%s fp=%s url=%s", event_uri, fp, url)
+            logger.info("main: skipping already-posted article_uri=%s event=%s url=%s", article_uri, event_uri, url)
             continue
         headline, bullets = summarize_for_miners(art)
         if not headline or not bullets:
@@ -77,6 +78,7 @@ def run():
                 "bullets": bullets2,
                 "url": url,
                 "event_uri": event_uri,
+                "article_uri": article_uri,
                 "fingerprint": fp,
             }
         )
@@ -111,7 +113,10 @@ def run():
             )
         # Always mark as posted (even on failure) to prevent duplicate attempts
         mark_posted(
-            url=item["url"], event_uri=item["event_uri"], fingerprint=item["fingerprint"]
+            url=item["url"],
+            event_uri=item["event_uri"],
+            article_uri=item.get("article_uri", ""),
+            fingerprint=item["fingerprint"],
         )
     if not posted:
         q = pop_one()
@@ -130,6 +135,7 @@ def run():
             mark_posted(
                 url=q.get("url", ""),
                 event_uri=q.get("event_uri", ""),
+                article_uri=q.get("article_uri", ""),
                 fingerprint=q.get("fingerprint", ""),
             )
 
