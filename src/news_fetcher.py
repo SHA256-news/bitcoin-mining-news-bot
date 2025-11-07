@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -32,32 +31,35 @@ def _session() -> requests.Session:
     return s
 
 
-def _extract_main_text(html: str) -> str:
+
+
+def _truthy(val: str | None) -> bool:
+    return bool(val) and val.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _log_er_error(resp: requests.Response, context: str = "") -> None:
     try:
-        soup = BeautifulSoup(html, "html.parser")
-        # Prefer <article>
-        art = soup.find("article")
-        if art:
-            paras = [p.get_text(" ", strip=True) for p in art.find_all("p")]
-            text = "\n".join([p for p in paras if p])
-            if len(text) > 400:
-                return text
-        # Fallback: role=main or id includes 'content'
-        main = soup.find(attrs={"role": "main"}) or soup.find(
-            id=lambda x: x and "content" in x.lower()
+        status = getattr(resp, "status_code", None)
+        text = getattr(resp, "text", "") or ""
+        snippet = text[:300].replace("\n", " ")
+        reason = ""
+        if status in (401, 403):
+            reason = "auth/permission"
+        elif status == 429:
+            reason = "rate/quota"
+        elif status and status >= 500:
+            reason = "server"
+        else:
+            reason = "client"
+        logger.error(
+            "eventregistry: %s error status=%s reason=%s body=%s",
+            context or "api",
+            status,
+            reason,
+            snippet,
         )
-        if main:
-            paras = [p.get_text(" ", strip=True) for p in main.find_all("p")]
-            text = "\n".join([p for p in paras if p])
-            if len(text) > 300:
-                return text
-        # Last resort: all paragraphs
-        paras = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-        text = "\n".join([p for p in paras if p])
-        return text
-    except Exception as e:
-        logger.debug("news_fetcher: html parse error: %s", e)
-        return ""
+    except Exception:
+        pass
 
 
 def _is_btc_sha256_article(article: Dict) -> bool:
@@ -291,6 +293,8 @@ def _get_concept_uris(api_key: str, query: str) -> List[str]:
             concepts = r.json()
             # Return URIs of top 3 most relevant concepts
             return [c.get("uri") for c in concepts[:3] if c.get("uri")]
+        else:
+            _log_er_error(r, "suggestConceptsFast")
     except Exception as e:
         logger.debug("news_fetcher: concept URI fetch failed: %s", e)
     return []
@@ -314,8 +318,10 @@ def _get_trending_score(api_key: str, query: str) -> Dict:
             if results:
                 # Calculate if recent volume is significantly higher than average
                 recent = results[-1].get("count", 0) if results else 0
-                avg = sum(r.get("count", 0) for r in results) / len(results) if results else 1
+                avg = sum(x.get("count", 0) for x in results) / len(results) if results else 1
                 return {"recent": recent, "average": avg, "is_spike": recent > avg * 1.5}
+        else:
+            _log_er_error(r, "timeAggr")
     except Exception as e:
         logger.debug("news_fetcher: trending score fetch failed: %s", e)
     return {"recent": 0, "average": 0, "is_spike": False}
@@ -327,6 +333,9 @@ def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> Li
 
     try:
         url = "https://eventregistry.org/api/v1/event/getEvents"
+        # Align event window with article recency (default last 24h)
+        now = datetime.utcnow()
+        max_hours = int(os.getenv("ARTICLES_MAX_HOURS", "24") or "24")
         params = {
             "apiKey": api_key,
             "resultType": "events",
@@ -335,8 +344,8 @@ def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> Li
             "lang": "eng",
             "eventsCount": 20,
             "minArticlesInEvent": 2,  # Only events with multiple sources
-            "dateStart": (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d"),
-            "dateEnd": datetime.now().strftime("%Y-%m-%d"),
+            "dateStart": (now - timedelta(hours=max_hours)).strftime("%Y-%m-%d"),
+            "dateEnd": now.strftime("%Y-%m-%d"),
             "dataType": ["news"],
             "includeEventSocialScore": True,
             "includeEventArticleCounts": True,
@@ -355,6 +364,8 @@ def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> Li
             events = (data.get("events", {}) or {}).get("results", [])
             logger.info("news_fetcher: found %d clustered events", len(events))
             return events
+        else:
+            _log_er_error(r, "getEvents")
     except Exception as e:
         logger.warning("news_fetcher: event fetch failed: %s", e)
     return []
@@ -496,6 +507,145 @@ def _fingerprint(article: Dict) -> str:
     return fp
 
 
+def _fetch_minute_stream_articles(api_key: str, query: str, concept_uris: List[str], minutes: int = 3) -> List[Dict]:
+    try:
+        url = "https://eventregistry.org/api/v1/minuteStreamArticles"
+        params = {
+            "apiKey": api_key,
+            "recentActivityArticlesUpdatesAfterMinsAgo": max(1, min(minutes, 240)),
+            "articleBodyLen": -1,
+            "dataType": ["news"],
+            "lang": "eng",
+        }
+        if concept_uris:
+            params["conceptUri"] = concept_uris
+            params["conceptOper"] = "or"
+        else:
+            params["keyword"] = query
+        r = _session().get(url, params=params, timeout=15)
+        if r.ok:
+            data = r.json() or {}
+            activity = ((data.get("recentActivityArticles") or {}).get("activity") or [])
+            return activity
+        else:
+            _log_er_error(r, "minuteStreamArticles")
+    except Exception as e:
+        logger.warning("news_fetcher: minuteStreamArticles failed: %s", e)
+    return []
+
+
+def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
+    import datetime as _dt
+
+    # Compute max age in hours: prefer ARTICLES_MAX_HOURS, else ARTICLES_MAX_DAYS*24 (default 24h)
+    try:
+        max_hours_env = os.getenv("ARTICLES_MAX_HOURS", "")
+        if max_hours_env.strip():
+            max_age_hours = max(1, int(max_hours_env))
+        else:
+            max_days = int(os.getenv("ARTICLES_MAX_DAYS", "1") or "1")
+            max_age_hours = max(1, max_days * 24)
+    except Exception:
+        max_age_hours = 24
+
+    now = _dt.datetime.utcnow().replace(tzinfo=_dt.timezone.utc)
+
+    uri = a.get("uri") or ""
+    url = a.get("url") or ""
+    # Extract social score and sentiment
+    social_score = (
+        (a.get("shares") or {}).get("facebook", 0) if isinstance(a.get("shares"), dict) else 0
+    )
+    sentiment = a.get("sentiment")
+    # Filter out articles with very negative sentiment (< -0.3)
+    if sentiment is not None and sentiment < -0.3:
+        return None
+    art = {
+        "title": a.get("title") or "",
+        "url": url,
+        "text": a.get("body") or a.get("text") or "",
+        "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
+        "article_uri": uri,
+        "date": a.get("dateTime") or a.get("date") or "",
+        "source": ((a.get("source") or {}).get("title") if isinstance(a.get("source"), dict) else ""),
+        "social_score": social_score,
+        "sentiment": sentiment,
+        "concepts": a.get("concepts", []),
+        "source_rank": (
+            (a.get("source") or {}).get("ranking", {}).get("importanceRank")
+            if isinstance(a.get("source"), dict)
+            else None
+        ),
+    }
+    # Drop stale items by publication time before spending extract quota
+    dt_str = a.get("dateTime") or a.get("date") or art["date"]
+    if dt_str:
+        try:
+            dt_parsed = None
+            # Try ISO first
+            try:
+                dt_parsed = _dt.datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            except Exception:
+                # Try YYYY-MM-DD
+                if len(dt_str) == 10:
+                    dt_parsed = _dt.datetime.fromisoformat(dt_str + "T00:00:00+00:00")
+            if dt_parsed and dt_parsed.tzinfo is None:
+                dt_parsed = dt_parsed.replace(tzinfo=_dt.timezone.utc)
+            if dt_parsed is not None:
+                age_h = (now - dt_parsed).total_seconds() / 3600.0
+                if age_h > max_age_hours:
+                    return None
+        except Exception:
+            # If parsing fails, continue (will be constrained by API dateStart)
+            pass
+
+    # Attempt Event Registry extractArticleInfo ONLY (no raw HTML parsing)
+    if (not art["text"]) or len(art["text"]) < 500:
+        if url:
+            try:
+                ext_url = "https://analytics.eventregistry.org/api/v1/extractArticleInfo"
+                er = _session().get(ext_url, params={"apiKey": api_key, "url": url}, timeout=15)
+                if er.ok:
+                    ej = er.json() or {}
+                    body = ej.get("body") or ""
+                    if body and len(body) > len(art["text"]):
+                        art["text"] = body
+                else:
+                    _log_er_error(er, "extractArticleInfo")
+            except Exception as e:
+                logger.debug("news_fetcher: extractArticleInfo failed for %s: %s", url, e)
+    # Drop if hard-banned by domain or keyword
+    url_str = art.get("url", "")
+    host = _domain(urlparse(url_str).netloc)
+    blob = f"{art.get('title','')} {art.get('text','')} {art.get('source','')} {url_str}".lower()
+
+    # Strict ban on 'crypto' references per user policy
+    import re as _re
+    def _has_banned_crypto(s: str) -> bool:
+        pats = [
+            r"\bcrypto\b",
+            r"crypto-",
+            r"cryptocurrenc",  # cryptocurrency / cryptocurrencies
+        ]
+        return any(_re.search(p, s, flags=_re.I) for p in pats)
+
+    sponsored_url = "/sponsored/" in url_str.lower() or "sponsored" in url_str.lower()
+    if (
+        host in BANNED_DOMAINS
+        or _is_eth_domain(host)
+        or any(k in blob for k in BANNED_KEYWORDS)
+        or _has_banned_crypto(blob)
+        or sponsored_url
+        or any(k in blob for k in SPONSORED_TOKENS)
+    ):
+        return None
+    if not _is_btc_sha256_article(art):
+        return None
+    # compute fingerprint once text is final
+    art["fingerprint"] = _fingerprint(art)
+    return art
+
+
 def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining") -> List[Dict]:
     """
     Fetch recent articles related to bitcoin mining using Event Registry API optimizations.
@@ -533,35 +683,62 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             trending["average"],
         )
 
+    # Optional minuteStream fast-path (for spikes or when enabled)
+    use_stream = _truthy(os.getenv("USE_MINUTE_STREAM")) or trending.get("is_spike")
+    stream_minutes = int(os.getenv("MINUTE_STREAM_MINS", "3") or "3")
+    event_uris: List[str] = []
+    stream_raw: List[Dict] = []
+    if use_stream:
+        stream_raw = _fetch_minute_stream_articles(api_key, query, concept_uris, stream_minutes)
+
     # Try event-based fetching first for better clustering
     events = _fetch_events_first(api_key, query, concept_uris)
     event_uris = [e.get("uri") for e in events if e.get("uri")]
 
     # Enhanced query payload with all optimizations
+    from datetime import datetime, timedelta
+
+    # Date window for recency (defaults to last 24 hours)
+    max_hours = int(os.getenv("ARTICLES_MAX_HOURS", "24") or "24")
+    # Event Registry dateStart/dateEnd are date-granular; we still enforce exact hours post-fetch
+    date_start = (datetime.utcnow() - timedelta(hours=max_hours)).strftime("%Y-%m-%d")
+    date_end = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # Source rank percentile (env-tunable)
+    start_rank = int(os.getenv("START_SOURCE_RANK_PERCENTILE", "0") or "0")
+    end_rank = int(os.getenv("END_SOURCE_RANK_PERCENTILE", "50") or "50")
+
+    # Event-only filter (env-tunable). Default keepAll for better recall within 24h.
+    events_only = _truthy(os.getenv("EVENTS_ONLY"))
+    event_filter_val = "skipArticlesWithoutEvent" if events_only else "keepAll"
+
     base_params = {
         "apiKey": api_key,
         "resultType": "articles",
-        "sortBy": "socialScore" if trending.get("is_spike") else "date",
+        "articlesSortBy": "socialScore" if trending.get("is_spike") else "date",
         "lang": "eng",
         # Ask Event Registry to return full article body when possible
         "articleBodyLen": -1,
         # Skip duplicate articles at API level
         "isDuplicateFilter": "skipDuplicates",
-        # NEW: Source quality filtering (top 50% only)
-        "startSourceRankPercentile": 0,
-        "endSourceRankPercentile": 50,
-        # NEW: Only news articles (exclude blogs, press releases)
+        # Source quality filtering (top X% only)
+        "startSourceRankPercentile": start_rank,
+        "endSourceRankPercentile": end_rank,
+        # Only news articles (exclude blogs, press releases)
         "dataType": ["news"],
-        # NEW: Only articles that are part of events (better signal)
-        "eventFilter": "skipArticlesWithoutEvent",
-        # NEW: Include social score for filtering
+        # Event filter (keepAll by default)
+        "eventFilter": event_filter_val,
+        # Include social score for filtering
         "includeArticleSocialScore": True,
-        # NEW: Include sentiment for filtering
+        # Include sentiment for filtering
         "includeArticleSentiment": True,
-        # NEW: Include concepts for better context
+        # Include concepts for better context
         "includeArticleConcepts": True,
         # Include source ranking info
         "includeSourceRanking": True,
+        # Date constraints to avoid stale items
+        "dateStart": date_start,
+        "dateEnd": date_end,
     }
 
     # Use concept URIs if available, otherwise fall back to keyword
@@ -577,102 +754,43 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
         seen_uris: set[str] = set()
         picked: List[Dict] = []
         # paginate a few pages to collect enough unique events
+        # If minute stream returned items, process those first
+        search_batches = []
+        if stream_raw:
+            search_batches.append(("minuteStream", stream_raw))
+        # Paginated getArticles results next
         for page in range(1, 6):
-            if len(picked) >= limit:
-                break
-            params = {
-                **base_params,
-                "articlesPage": page,
-                "articlesCount": 50,
-            }
+            params = {**base_params, "articlesPage": page, "articlesCount": 50}
             r = _session().get(url, params=params, timeout=20)
-            r.raise_for_status()
+            if not r.ok:
+                _log_er_error(r, "getArticles")
+                continue
             data = r.json()
             raw_results = (data.get("articles", {}) or {}).get("results", [])
-            raw_total += len(raw_results)
+            search_batches.append((f"page-{page}", raw_results))
+
+        for label, batch in search_batches:
+            if len(picked) >= limit:
+                break
+            raw_total += len(batch)
             # Process each article
-            for a in raw_results:
+            for a in batch:
                 uri = a.get("uri") or ""
                 if uri in seen_uris:
                     continue
                 seen_uris.add(uri)
 
-                # Extract social score and sentiment
-                social_score = (
-                    (a.get("shares") or {}).get("facebook", 0)
-                    if isinstance(a.get("shares"), dict)
-                    else 0
-                )
-                sentiment = a.get("sentiment")
-
-                # Filter out articles with very negative sentiment (< -0.3)
-                if sentiment is not None and sentiment < -0.3:
-                    logger.debug(
-                        "news_fetcher: skipping negative article sentiment=%.2f uri=%s",
-                        sentiment,
-                        uri,
-                    )
-                    continue
-
-                art = {
-                    "title": a.get("title") or "",
-                    "url": a.get("url") or "",
-                    "text": a.get("body") or a.get("text") or "",
-                    "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
-                    "article_uri": uri,
-                    "date": a.get("date") or a.get("dateTime") or "",
-                    "source": (
-                        (a.get("source") or {}).get("title")
-                        if isinstance(a.get("source"), dict)
-                        else ""
-                    ),
-                    "social_score": social_score,
-                    "sentiment": sentiment,
-                    "concepts": a.get("concepts", []),
-                    "source_rank": (
-                        (a.get("source") or {}).get("ranking", {}).get("importanceRank")
-                        if isinstance(a.get("source"), dict)
-                        else None
-                    ),
-                }
-                # If API body is missing/short, optionally fetch full article HTML and extract text
-                if (not art["text"]) or len(art["text"]) < 500:
-                    url2 = art["url"]
-                    if url2:
-                        try:
-                            hr = _session().get(url2, timeout=15)
-                            if hr.ok and hr.text:
-                                full = _extract_main_text(hr.text)
-                                if len(full) > len(art["text"]):
-                                    art["text"] = full
-                        except Exception as e:
-                            logger.debug(
-                                "news_fetcher: full-article fetch failed for %s: %s", url2, e
-                            )
-                # Drop if hard-banned by domain or keyword
-                url_str = art.get("url", "")
-                host = _domain(urlparse(url_str).netloc)
-                blob = f"{art.get('title','')} {art.get('text','')} {art.get('source','')} {url_str}".lower()
-                sponsored_url = "/sponsored/" in url_str.lower() or "sponsored" in url_str.lower()
-                if (
-                    host in BANNED_DOMAINS
-                    or _is_eth_domain(host)
-                    or any(k in blob for k in BANNED_KEYWORDS)
-                    or sponsored_url
-                    or any(k in blob for k in SPONSORED_TOKENS)
-                ):
-                    continue
-                if _is_btc_sha256_article(art):
-                    # compute fingerprint once text is final
-                    art["fingerprint"] = _fingerprint(art)
+                art = _build_article_from_er(a, api_key)
+                if art:
                     articles.append(art)
             # Deduplicate by fingerprint first (most specific), with event_uri as secondary grouping
             # This allows multiple articles per event if they have different fingerprints
             grouped: Dict[str, List[Dict]] = {}
             for art in articles:
                 fp = art.get("fingerprint", "")
-                # Use fingerprint as primary key; only fall back to event_uri if no fingerprint
-                key = fp if fp else (art.get("event_uri") or _signature(art.get("title", "")))
+                ev = art.get("event_uri") or ""
+                # Prefer event-level grouping; fall back to fingerprint, then normalized title signature
+                key = ev if ev else (fp if fp else _signature(art.get("title", "")))
                 grouped.setdefault(key, []).append(art)
             picked = []
             for key, group in grouped.items():

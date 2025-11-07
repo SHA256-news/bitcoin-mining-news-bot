@@ -10,10 +10,10 @@ from src.state import already_posted, mark_posted, save_fetched_article
 
 
 def _init_logging():
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    # Centralized JSON logging (set LOG_PLAIN=1 for text)
+    from src.logging_setup import setup_logging
+
+    setup_logging()
 
 
 def _truthy(val: str | None) -> bool:
@@ -25,11 +25,47 @@ def run():
     _init_logging()
     logger = logging.getLogger("main")
 
+    # One-time queue cleanup: dedupe, purge banned tokens, purge posted, collapse company duplicates (keep most authoritative domain)
+    try:
+        from src.queue import (
+            dedupe as _dedupe_queue,
+            purge_banned_crypto as _purge_crypto,
+            purge_posted as _purge_posted,
+            purge_company_duplicates_keep_best_domain as _purge_company_dupes,
+        )
+
+        _dedupe_queue()
+        removed_c = _purge_crypto()
+        removed_p = _purge_posted(event_hours=int(os.getenv("QUEUE_POST_EVENT_SKIP_HOURS", "168") or "168"))
+        removed_company = _purge_company_dupes()
+        logger.info(
+            "main: queue cleanup done deduped=1 purged_crypto=%s purged_posted=%s purged_company_dupes=%s",
+            removed_c,
+            removed_p,
+            removed_company,
+        )
+    except Exception:
+        pass
+
+    # Optional: sync posted from X (with keyword fallback) to prevent re-queueing older stories
+    if _truthy(os.getenv("SYNC_POSTED_FROM_X")):
+        try:
+            from src.sync_posted import sync_posted_from_x
+
+            summary = sync_posted_from_x()
+            logger.info(
+                "main: synced posted from X: %s",
+                summary,
+            )
+        except Exception as e:
+            logger.warning("main: sync_posted_from_x failed: %s", e)
+
     # Default to 5 to ensure we consider multiple candidates per run
     limit_str = os.getenv("ARTICLES_LIMIT", "5").strip()
     limit = int(limit_str) if limit_str else 5
     query = os.getenv("TOPIC_QUERY", "bitcoin mining")
     dry_run = _truthy(os.getenv("DRY_RUN"))
+    skip_summarizer = _truthy(os.getenv("SKIP_SUMMARIZER"))
 
     # Respect daily Gemini budget: cap items to remaining across models
     from src.state import gemini_remaining
@@ -46,6 +82,22 @@ def run():
     event_window_hours = (
         int(event_window_hours) if (event_window_hours or "").strip().isdigit() else window_hours
     )
+
+    def _dedupe_prepared(items: list[dict]) -> list[dict]:
+        seen: set[str] = set()
+        out: list[dict] = []
+        for it in items:
+            k = (
+                (it.get("event_uri") or "").strip()
+                or (it.get("fingerprint") or "").strip()
+                or (it.get("article_uri") or "").strip()
+                or (it.get("url") or "").strip()
+            )
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(it)
+        return out
 
     for art in articles:
         url = art.get("url", "")
@@ -66,6 +118,20 @@ def run():
                 "main: skipping already-posted article event=%s url=%s",
                 event_uri,
                 url,
+            )
+            continue
+        if skip_summarizer:
+            # Stage raw title without calling Gemini; don't save fetched article
+            head = (source_title or "Bitcoin mining update").strip()[:120] or "Bitcoin mining update"
+            prepared.append(
+                {
+                    "headline": head,
+                    "bullets": [],
+                    "url": url,
+                    "event_uri": event_uri,
+                    "article_uri": article_uri,
+                    "fingerprint": fp,
+                }
             )
             continue
         headline, bullets = summarize_for_miners(art)
@@ -100,13 +166,48 @@ def run():
             }
         )
 
+    # If skip_summarizer: stage and exit early to avoid any Gemini usage
+    if skip_summarizer:
+        if prepared:
+            from src.queue import push_many
+            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
+            to_stage = [
+                it
+                for it in _dedupe_prepared(prepared)
+                if not already_posted(
+                    url=it.get("url", ""),
+                    event_uri=it.get("event_uri", ""),
+                    fingerprint=it.get("fingerprint", ""),
+                    article_uri=it.get("article_uri", ""),
+                    window_hours=window_hours,
+                    event_window_hours=post_event_skip_hours,
+                )
+            ]
+            if to_stage:
+                push_many(to_stage)
+        return
+
     # DRY_RUN: preview all threads
     if dry_run:
         # Stage prepared items into the queue so a subsequent real run can post the newest first
         if prepared:
             from src.queue import push_many
-
-            push_many(list(reversed(prepared)))
+            # Skip anything already posted within the posting decision window
+            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
+            to_stage = [
+                it
+                for it in _dedupe_prepared(prepared)
+                if not already_posted(
+                    url=it.get("url", ""),
+                    event_uri=it.get("event_uri", ""),
+                    fingerprint=it.get("fingerprint", ""),
+                    article_uri=it.get("article_uri", ""),
+                    window_hours=window_hours,
+                    event_window_hours=post_event_skip_hours,
+                )
+            ]
+            if to_stage:
+                push_many(to_stage)
         for item in prepared:
             t1 = compose_tweet_1(item["headline"], item["bullets"])
             t2 = compose_tweet_2(item["url"])
@@ -141,7 +242,21 @@ def run():
         # Stage ALL prepared items (including the used one) into the queue, newest first, minus the one we just used
         rest = [x for x in prepared if x is not item]
         if rest:
-            push_many(list(reversed(rest)))
+            # Skip anything already posted within the posting decision window
+            rest2 = [
+                it
+                for it in _dedupe_prepared(rest)
+                if not already_posted(
+                    url=it.get("url", ""),
+                    event_uri=it.get("event_uri", ""),
+                    fingerprint=it.get("fingerprint", ""),
+                    article_uri=it.get("article_uri", ""),
+                    window_hours=window_hours,
+                    event_window_hours=post_event_skip_hours,
+                )
+            ]
+            if rest2:
+                push_many(rest2)
         if tid1:
             posted = True
             # Only mark as posted on success
@@ -158,10 +273,27 @@ def run():
                 item.get("fingerprint", ""),
                 item.get("url", ""),
             )
+            # Requeue the failed candidate so it can be attempted next run
+            push_many([item])
     else:
         # No fresh candidates found; push all prepared into queue for later
         if prepared:
-            push_many(list(reversed(prepared)))
+            # Skip anything already posted within the posting decision window
+            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
+            to_stage = [
+                it
+                for it in _dedupe_prepared(prepared)
+                if not already_posted(
+                    url=it.get("url", ""),
+                    event_uri=it.get("event_uri", ""),
+                    fingerprint=it.get("fingerprint", ""),
+                    article_uri=it.get("article_uri", ""),
+                    window_hours=window_hours,
+                    event_window_hours=post_event_skip_hours,
+                )
+            ]
+            if to_stage:
+                push_many(to_stage)
 
     if not posted:
         # Try queue fallback, skipping duplicates within the posting decision window
@@ -193,6 +325,9 @@ def run():
                     q.get("fingerprint", ""),
                     q.get("url", ""),
                 )
+                # Requeue the item to avoid losing it on transient failures (e.g., rate limits)
+                from src.queue import push_many as _requeue
+                _requeue([q])
 
 
 if __name__ == "__main__":

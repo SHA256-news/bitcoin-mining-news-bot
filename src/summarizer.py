@@ -5,7 +5,8 @@ from typing import Dict, Tuple
 import time
 import re
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from src.state import (
     get_cached_summary,
     set_cached_summary,
@@ -87,7 +88,7 @@ def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
     title = (article.get("title") or "").strip()
     text = (article.get("text") or "").strip()
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     model_name_pro = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
     model_name_flash = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
     prefer_pro = bool(os.getenv("PREFER_GEMINI_PRO", "1") not in {"0", "false", "no"})
@@ -150,16 +151,17 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
         if gemini_remaining(model_name) <= 0:
             raise RuntimeError(f"no remaining daily budget for {model_name}")
         _throttle(model_name)
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name,
-            generation_config={
-                "temperature": 0.4,
-                "response_mime_type": "application/json",
-            },
+        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        config = types.GenerateContentConfig(
+            temperature=0.4,
+            response_mime_type="application/json",
         )
         try:
-            resp = model.generate_content([sys, usr])
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=[sys, usr],
+                config=config,
+            )
             gemini_increment(model_name)
             return resp.text or "{}"
         except Exception as e:
@@ -173,7 +175,11 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
                 except Exception:
                     time.sleep(30)
                 # single retry
-                resp = model.generate_content([sys, usr])
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[sys, usr],
+                    config=config,
+                )
                 gemini_increment(model_name)
                 return resp.text or "{}"
             raise

@@ -2,10 +2,12 @@ name: Bitcoin Mining News Bot
 
 on:
   schedule:
-    # Every 3 hours at minute 0: 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00
+    # Every 3 hours at minute 0: 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 (UTC)
     - cron: "0 */3 * * *"
-    # Offset by 90 minutes: 01:30, 04:30, 07:30, 10:30, 13:30, 16:30, 19:30, 22:30
+    # Offset by 90 minutes: 01:30, 04:30, 07:30, 10:30, 13:30, 16:30, 19:30, 22:30 (UTC)
     - cron: "30 1,4,7,10,13,16,19,22 * * *"
+    # Backup: Hourly at minute 15 (UTC) to mitigate missed cron events; safe due to concurrency guard
+    - cron: "15 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -71,6 +73,9 @@ jobs:
             exit 1
           fi
 
+      - name: Print trigger info
+        run: |
+          echo "event=${{ github.event_name }} ref=${{ github.ref }} repo=${{ github.repository }} at=$(date -u)"
       - name: Run bot
         run: |
           python -m src.main

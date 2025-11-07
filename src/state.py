@@ -5,6 +5,7 @@ import time
 from typing import Dict, List
 
 DEFAULT_STATE_FILE = os.getenv("STATE_FILE", ".state/state.json")
+POSTED_FILE = os.getenv("POSTED_FILE", ".state/posted.json")
 
 
 def _ensure_parent(path: pathlib.Path) -> None:
@@ -46,6 +47,49 @@ def _load() -> Dict:
         return _default_state()
 
 
+# New, from-scratch posted registry (separate file, simple and robust)
+
+def _posted_path() -> pathlib.Path:
+    p = pathlib.Path(POSTED_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _posted_default() -> Dict:
+    return {"items": []}  # each: {url?, event_uri?, article_uri?, fingerprint?, ts}
+
+
+def _posted_load() -> Dict:
+    p = _posted_path()
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return _posted_default()
+    # First-time migration from legacy state.json if present
+    st = _load()
+    items: List[Dict] = []
+    now = _now_ts()
+    for u in st.get("posted_urls") or []:
+        if isinstance(u, dict) and u.get("url"):
+            items.append({"url": str(u.get("url")), "ts": int(u.get("ts", now))})
+    for e in st.get("posted_events") or []:
+        if isinstance(e, dict) and e.get("event"):
+            items.append({"event_uri": str(e.get("event")), "ts": int(e.get("ts", now))})
+    for a in st.get("posted_article_uris") or []:
+        if isinstance(a, dict) and a.get("article_uri"):
+            items.append({"article_uri": str(a.get("article_uri")), "ts": int(a.get("ts", now))})
+    for f in st.get("posted_fingerprints") or []:
+        if isinstance(f, dict) and f.get("fp"):
+            items.append({"fingerprint": str(f.get("fp")), "ts": int(f.get("ts", now))})
+    return {"items": items}
+
+
+def _posted_save(obj: Dict) -> None:
+    p = _posted_path()
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _save(state: Dict) -> None:
     p = _state_path()
     _ensure_parent(p)
@@ -58,36 +102,6 @@ def _now_ts() -> int:
 
 def _prune(state: Dict, window_hours: int = 72) -> None:
     cutoff = _now_ts() - window_hours * 3600
-    # prune posted_fingerprints (dicts with ts)
-    fps: List[Dict] = state.get("posted_fingerprints") or []
-    state["posted_fingerprints"] = [
-        x for x in fps if isinstance(x, dict) and x.get("ts", 0) >= cutoff
-    ]
-    # prune posted_urls (migrate legacy strings by dropping them)
-    urls = state.get("posted_urls") or []
-    new_urls: List[Dict] = []
-    for u in urls:
-        if isinstance(u, dict):
-            ts = int(u.get("ts", 0))
-            if ts >= cutoff and u.get("url"):
-                new_urls.append({"url": str(u.get("url")), "ts": ts})
-        # legacy string entries are considered old and are dropped
-    state["posted_urls"] = new_urls
-    # prune posted_events (migrate legacy strings by dropping them)
-    evs = state.get("posted_events") or []
-    new_evs: List[Dict] = []
-    for e in evs:
-        if isinstance(e, dict):
-            ts = int(e.get("ts", 0))
-            if ts >= cutoff and e.get("event"):
-                new_evs.append({"event": str(e.get("event")), "ts": ts})
-        # legacy string entries are considered old and are dropped
-    state["posted_events"] = new_evs
-    # prune posted_article_uris
-    article_uris = state.get("posted_article_uris") or []
-    state["posted_article_uris"] = [
-        x for x in article_uris if isinstance(x, dict) and x.get("ts", 0) >= cutoff
-    ]
     # prune summary cache
     cache: List[Dict] = state.get("summary_cache") or []
     state["summary_cache"] = [x for x in cache if isinstance(x, dict) and x.get("ts", 0) >= cutoff]
@@ -99,6 +113,14 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     ]
 
 
+def _posted_prune(window_hours: int = 168) -> None:
+    obj = _posted_load()
+    cutoff = _now_ts() - window_hours * 3600
+    items: List[Dict] = obj.get("items") or []
+    obj["items"] = [x for x in items if isinstance(x, dict) and int(x.get("ts", 0)) >= cutoff]
+    _posted_save(obj)
+
+
 def already_posted(
     url: str = "",
     event_uri: str = "",
@@ -107,62 +129,52 @@ def already_posted(
     window_hours: int = 72,
     event_window_hours: int | None = None,
 ) -> bool:
-    """Return True if we've posted this item recently.
+    """Return True if we've posted this item recently (rebuilt, minimal and robust).
 
-    window_hours controls URL/fingerprint/article de-dup window.
-    event_window_hours controls event-level de-dup (None => use window_hours).
+    Checks, in order: article_uri, event_uri (with its own window), fingerprint, url.
     """
-    state = _load()
-    # Prune with the max window to ensure we keep enough entries for both windows
-    # Use provided event_window_hours even if set to 0
-    _prune(
-        state,
-        max(window_hours, event_window_hours if event_window_hours is not None else window_hours),
-    )
+    import logging as _logging
 
-    # Check article_uri FIRST (most reliable from Event Registry)
-    article_seen = False
+    _log = _logging.getLogger(__name__)
+    # prune caches (non-posted state)
+    _prune(_load(), max(window_hours, event_window_hours or window_hours))
+
+    # prune posted registry
+    _posted_prune(max(window_hours, event_window_hours or window_hours))
+    obj = _posted_load()
+    items: List[Dict] = obj.get("items") or []
+
+    now = _now_ts()
+    # Article URI (strongest)
     if article_uri:
-        for a in state.get("posted_article_uris") or []:
-            if isinstance(a, dict) and a.get("article_uri") == article_uri:
-                article_seen = True
+        for it in items:
+            if it.get("article_uri") == article_uri and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+                _log.debug("already_posted: match=article_uri uri=%s", article_uri)
                 return True
 
-    # Check recent events with separate window if provided
+    # Event URI with its own window
+    ev_win = event_window_hours if event_window_hours is not None else window_hours
     if event_uri:
-        cutoff_event_hours = event_window_hours if event_window_hours is not None else window_hours
-        cutoff_event = _now_ts() - cutoff_event_hours * 3600
-        for e in state.get("posted_events") or []:
-            if (
-                isinstance(e, dict)
-                and e.get("event") == event_uri
-                and int(e.get("ts", 0)) >= cutoff_event
-            ):
+        for it in items:
+            if it.get("event_uri") == event_uri and (now - int(it.get("ts", 0))) <= ev_win * 3600:
+                _log.debug("already_posted: match=event event=%s", event_uri)
                 return True
 
-    # Check recent fingerprints within window
+    # Fingerprint
     if fingerprint:
-        cutoff = _now_ts() - window_hours * 3600
-        for x in state.get("posted_fingerprints") or []:
-            if (
-                isinstance(x, dict)
-                and x.get("fp") == fingerprint
-                and int(x.get("ts", 0)) >= cutoff
-                and (not article_uri or article_seen)
-            ):
+        for it in items:
+            if it.get("fingerprint") == fingerprint and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+                _log.debug("already_posted: match=fingerprint fp=%s", fingerprint)
                 return True
 
-    # Check recent urls within window
+    # URL
     if url:
-        cutoff = _now_ts() - window_hours * 3600
-        for u in state.get("posted_urls") or []:
-            if (
-                isinstance(u, dict)
-                and u.get("url") == url
-                and int(u.get("ts", 0)) >= cutoff
-                and (not article_uri or article_seen)
-            ):
+        for it in items:
+            if it.get("url") == url and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+                _log.debug("already_posted: match=url url=%s", url)
                 return True
+
+    return False
 
     return False
 
@@ -172,45 +184,33 @@ def mark_posted(
     event_uri: str = "",
     fingerprint: str = "",
     article_uri: str = "",
-    max_entries: int = 1000,
+    max_entries: int = 2000,
 ) -> None:
-    state = _load()
-    _prune(state)
+    """Record this item as posted (rebuilt, minimal and robust)."""
     now = _now_ts()
-    # Track article_uri (primary key from Event Registry)
-    if article_uri:
-        article_uris = state.get("posted_article_uris") or []
-        if not any(
-            isinstance(a, dict) and a.get("article_uri") == article_uri for a in article_uris
-        ):
-            article_uris.append({"article_uri": article_uri, "ts": now})
-            if len(article_uris) > max_entries:
-                article_uris = article_uris[-max_entries:]
-            state["posted_article_uris"] = article_uris
+    obj = _posted_load()
+    items: List[Dict] = obj.get("items") or []
+    entry = {"ts": now}
     if url:
-        urls = state.get("posted_urls") or []
-        # avoid duplicates
-        if not any(isinstance(u, dict) and u.get("url") == url for u in urls):
-            urls.append({"url": url, "ts": now})
-            if len(urls) > max_entries:
-                urls = urls[-max_entries:]
-            state["posted_urls"] = urls
+        entry["url"] = url
     if event_uri:
-        evs = state.get("posted_events") or []
-        if not any(isinstance(e, dict) and e.get("event") == event_uri for e in evs):
-            evs.append({"event": event_uri, "ts": now})
-            if len(evs) > max_entries:
-                evs = evs[-max_entries:]
-            state["posted_events"] = evs
+        entry["event_uri"] = event_uri
+    if article_uri:
+        entry["article_uri"] = article_uri
     if fingerprint:
-        fps: List[Dict] = state.get("posted_fingerprints") or []
-        # avoid duplicates
-        if not any(isinstance(f, dict) and f.get("fp") == fingerprint for f in fps):
-            fps.append({"fp": fingerprint, "ts": now})
-            if len(fps) > max_entries:
-                fps = fps[-max_entries:]
-            state["posted_fingerprints"] = fps
-    _save(state)
+        entry["fingerprint"] = fingerprint
+    # Deduplicate by any present key
+    def _same(a: Dict, b: Dict) -> bool:
+        for k in ("article_uri", "event_uri", "fingerprint", "url"):
+            if a.get(k) and b.get(k) and a.get(k) == b.get(k):
+                return True
+        return False
+    items = [it for it in items if not _same(it, entry)]
+    items.append(entry)
+    if len(items) > max_entries:
+        items = items[-max_entries:]
+    obj["items"] = items
+    _posted_save(obj)
 
 
 # Summary cache (72h window)
