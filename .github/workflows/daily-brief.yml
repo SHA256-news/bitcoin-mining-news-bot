@@ -51,9 +51,15 @@ jobs:
       - name: Ensure docs/posts dir exists
         run: mkdir -p docs/posts
 
+      - name: Fetch latest articles into state (no tweeting)
+        env:
+          DRY_RUN: "1"
+        run: |
+          python -m src.main
+
       - name: Generate editorial daily brief
         run: |
-          python -m src.editorial_daily_brief
+          python -m src.editorial_daily_brief 48
 
       - name: Check for changes
         id: check_changes
