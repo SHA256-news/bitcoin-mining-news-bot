@@ -57,9 +57,9 @@ jobs:
         run: |
           python -m src.main
 
-      - name: Generate editorial daily brief
+      - name: Generate editorial daily brief (24h)
         run: |
-          python -m src.editorial_daily_brief 48
+          python -m src.editorial_daily_brief 24
 
       - name: Check for changes
         id: check_changes
