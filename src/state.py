@@ -49,6 +49,7 @@ def _load() -> Dict:
 
 # New, from-scratch posted registry (separate file, simple and robust)
 
+
 def _posted_path() -> pathlib.Path:
     p = pathlib.Path(POSTED_FILE)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +149,10 @@ def already_posted(
     # Article URI (strongest)
     if article_uri:
         for it in items:
-            if it.get("article_uri") == article_uri and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+            if (
+                it.get("article_uri") == article_uri
+                and (now - int(it.get("ts", 0))) <= window_hours * 3600
+            ):
                 _log.debug("already_posted: match=article_uri uri=%s", article_uri)
                 return True
 
@@ -163,7 +167,10 @@ def already_posted(
     # Fingerprint
     if fingerprint:
         for it in items:
-            if it.get("fingerprint") == fingerprint and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+            if (
+                it.get("fingerprint") == fingerprint
+                and (now - int(it.get("ts", 0))) <= window_hours * 3600
+            ):
                 _log.debug("already_posted: match=fingerprint fp=%s", fingerprint)
                 return True
 
@@ -199,12 +206,14 @@ def mark_posted(
         entry["article_uri"] = article_uri
     if fingerprint:
         entry["fingerprint"] = fingerprint
+
     # Deduplicate by any present key
     def _same(a: Dict, b: Dict) -> bool:
         for k in ("article_uri", "event_uri", "fingerprint", "url"):
             if a.get(k) and b.get(k) and a.get(k) == b.get(k):
                 return True
         return False
+
     items = [it for it in items if not _same(it, entry)]
     items.append(entry)
     if len(items) > max_entries:

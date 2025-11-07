@@ -31,8 +31,6 @@ def _session() -> requests.Session:
     return s
 
 
-
-
 def _truthy(val: str | None) -> bool:
     return bool(val) and val.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -507,7 +505,9 @@ def _fingerprint(article: Dict) -> str:
     return fp
 
 
-def _fetch_minute_stream_articles(api_key: str, query: str, concept_uris: List[str], minutes: int = 3) -> List[Dict]:
+def _fetch_minute_stream_articles(
+    api_key: str, query: str, concept_uris: List[str], minutes: int = 3
+) -> List[Dict]:
     try:
         url = "https://eventregistry.org/api/v1/minuteStreamArticles"
         params = {
@@ -525,7 +525,7 @@ def _fetch_minute_stream_articles(api_key: str, query: str, concept_uris: List[s
         r = _session().get(url, params=params, timeout=15)
         if r.ok:
             data = r.json() or {}
-            activity = ((data.get("recentActivityArticles") or {}).get("activity") or [])
+            activity = (data.get("recentActivityArticles") or {}).get("activity") or []
             return activity
         else:
             _log_er_error(r, "minuteStreamArticles")
@@ -567,7 +567,9 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
         "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
         "article_uri": uri,
         "date": a.get("dateTime") or a.get("date") or "",
-        "source": ((a.get("source") or {}).get("title") if isinstance(a.get("source"), dict) else ""),
+        "source": (
+            (a.get("source") or {}).get("title") if isinstance(a.get("source"), dict) else ""
+        ),
         "social_score": social_score,
         "sentiment": sentiment,
         "concepts": a.get("concepts", []),
@@ -621,6 +623,7 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
 
     # Strict ban on 'crypto' references per user policy
     import re as _re
+
     def _has_banned_crypto(s: str) -> bool:
         pats = [
             r"\bcrypto\b",

@@ -60,13 +60,16 @@ def dedupe() -> None:
 def purge_banned_crypto() -> int:
     """Remove items whose headline/url contain banned 'crypto' tokens."""
     import re
+
     q = _load()
     before = len(q)
+
     def bad(it: dict) -> bool:
         h = (it.get("headline") or "").lower()
         u = (it.get("url") or "").lower()
         pats = [r"\bcrypto\b", r"crypto-", r"cryptocurrenc"]
         return any(re.search(p, h) or re.search(p, u) for p in pats)
+
     q = [it for it in q if not bad(it)]
     _save(q)
     return before - len(q)
@@ -75,6 +78,7 @@ def purge_banned_crypto() -> int:
 def purge_posted(event_hours: int = 168, window_hours: int = 168) -> int:
     """Remove queue items that have already been posted recently (by event/url/fp/article)."""
     from src.state import already_posted
+
     q = _load()
     before = len(q)
     kept = []
@@ -150,6 +154,7 @@ def purge_company_duplicates_keep_best_domain() -> int:
         "alps",
         "bitdeer",
     ]
+
     def company_key(title: str) -> str:
         t = (title or "").lower()
         for c in companies:

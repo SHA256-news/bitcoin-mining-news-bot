@@ -1,6 +1,5 @@
 import os
 import re
-import logging
 from typing import List, Dict, Optional
 
 from src.state import mark_posted
@@ -86,7 +85,6 @@ def sync_posted_from_x(max_heads: int = 50) -> Dict:
 
     Returns summary dict with counts.
     """
-    log = logging.getLogger(__name__)
     try:
         import tweepy  # type: ignore
     except Exception:
@@ -130,7 +128,9 @@ def sync_posted_from_x(max_heads: int = 50) -> Dict:
         refs = getattr(t, "referenced_tweets", None) or []
         for r in refs:
             try:
-                if getattr(r, "type", None) == "replied_to" and str(getattr(r, "id", "")) == str(parent_id):
+                if getattr(r, "type", None) == "replied_to" and str(getattr(r, "id", "")) == str(
+                    parent_id
+                ):
                     return True
             except Exception:
                 pass

@@ -36,7 +36,9 @@ def run():
 
         _dedupe_queue()
         removed_c = _purge_crypto()
-        removed_p = _purge_posted(event_hours=int(os.getenv("QUEUE_POST_EVENT_SKIP_HOURS", "168") or "168"))
+        removed_p = _purge_posted(
+            event_hours=int(os.getenv("QUEUE_POST_EVENT_SKIP_HOURS", "168") or "168")
+        )
         removed_company = _purge_company_dupes()
         logger.info(
             "main: queue cleanup done deduped=1 purged_crypto=%s purged_posted=%s purged_company_dupes=%s",
@@ -122,7 +124,9 @@ def run():
             continue
         if skip_summarizer:
             # Stage raw title without calling Gemini; don't save fetched article
-            head = (source_title or "Bitcoin mining update").strip()[:120] or "Bitcoin mining update"
+            head = (source_title or "Bitcoin mining update").strip()[
+                :120
+            ] or "Bitcoin mining update"
             prepared.append(
                 {
                     "headline": head,
@@ -170,6 +174,7 @@ def run():
     if skip_summarizer:
         if prepared:
             from src.queue import push_many
+
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
             to_stage = [
                 it
@@ -192,6 +197,7 @@ def run():
         # Stage prepared items into the queue so a subsequent real run can post the newest first
         if prepared:
             from src.queue import push_many
+
             # Skip anything already posted within the posting decision window
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
             to_stage = [
@@ -327,6 +333,7 @@ def run():
                 )
                 # Requeue the item to avoid losing it on transient failures (e.g., rate limits)
                 from src.queue import push_many as _requeue
+
                 _requeue([q])
 
 
