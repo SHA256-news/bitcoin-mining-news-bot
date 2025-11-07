@@ -1,0 +1,47 @@
+name: Editorial Manual Brief
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  manual-brief:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_EDITORIAL_KEY: ${{ secrets.GEMINI_EDITORIAL_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ensure docs/posts dir exists
+        run: mkdir -p docs/posts
+
+      - name: Generate editorial brief from manual list
+        run: |
+          python -m src.editorial_manual
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git diff --quiet docs/posts/ || echo "changes=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push daily brief
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/posts/
+          git commit -m "Add editorial brief (manual) for $(date -u +%Y-%m-%d)"
+          git push
