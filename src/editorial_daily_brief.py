@@ -259,9 +259,9 @@ def _generate_post_html(markdown_content: str, display_date: str, article_count:
       </header>
       
       <main class="flex-1 mx-auto w-full max-w-3xl px-4 sm:px-6 lg:px-8 py-12">
-        <div class="prose prose-invert prose-zinc max-w-none">
+        <article class="prose prose-invert prose-zinc max-w-none">
           <p>{html_content}</p>
-        </div>
+        </article>
         
         <div class="mt-12 pt-8 border-t border-zinc-800 text-center">
           <a href="/" class="text-zinc-400 underline hover:text-zinc-100">← Back to Home</a>
