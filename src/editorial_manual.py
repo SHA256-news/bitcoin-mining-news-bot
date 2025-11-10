@@ -133,7 +133,7 @@ OUTPUT FORMAT (Markdown):
         return ""
 
     # Write HTML post
-    html = _generate_post_html(content, display_date, len(articles))
+    html = _generate_post_html(content, display_date, len(articles), articles)
     posts_dir = pathlib.Path("docs/posts")
     posts_dir.mkdir(parents=True, exist_ok=True)
     post_filename = f"{date_str}-editorial-brief.html"
