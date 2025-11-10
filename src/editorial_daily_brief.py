@@ -207,13 +207,12 @@ Write the brief now. Use your knowledge to add depth beyond just the mining arti
 def _generate_post_html(markdown_content: str, display_date: str, article_count: int) -> str:
     """Generate HTML for editorial blog post."""
 
-    # Simple markdown to HTML conversion (for basic formatting)
-    html_content = markdown_content
-    html_content = html_content.replace("\n\n", "</p><p>")
-    html_content = html_content.replace("\n", "<br>")
+    # Prepare and sanitize markdown
+    import re
+    # Strip leading 'Daily Brief: ...' heading if present
+    markdown_content = re.sub(r"^\s*#\s*Daily\s*Brief:.*\n?", "", markdown_content, count=1, flags=re.IGNORECASE | re.MULTILINE)
 
     # Convert headers
-    import re
 
     html_content = re.sub(
         r"^# (.+)$",
@@ -230,6 +229,10 @@ def _generate_post_html(markdown_content: str, display_date: str, article_count:
     html_content = re.sub(
         r"^\*\*(.+?)\*\*:", r"<strong>\1</strong>:", html_content, flags=re.MULTILINE
     )
+
+    # Basic paragraph/line breaks
+    html_content = html_content.replace("\n\n", "</p><p>")
+    html_content = html_content.replace("\n", "<br>")
 
     return f"""<!doctype html>
 <html lang="en">
@@ -259,7 +262,7 @@ def _generate_post_html(markdown_content: str, display_date: str, article_count:
       </header>
       
       <main class="flex-1 mx-auto w-full max-w-3xl px-4 sm:px-6 lg:px-8 py-12">
-        <article class="prose prose-invert prose-zinc max-w-none">
+        <article class="prose prose-lg prose-invert prose-zinc max-w-none">
           <p>{html_content}</p>
         </article>
         
