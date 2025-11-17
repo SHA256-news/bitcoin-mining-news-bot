@@ -151,7 +151,7 @@ def sync_posted_from_x(max_heads: int = 50) -> Dict:
     fallback = 0
 
     heads = []
-    for conv_id, arr in by_conv.items():
+    for _, arr in by_conv.items():
         arr.sort(key=lambda x: x.created_at)
         head = next((t for t in arr if getattr(t, "in_reply_to_user_id", None) in (None, "")), None)
         if not head:
