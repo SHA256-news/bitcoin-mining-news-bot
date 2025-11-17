@@ -102,8 +102,8 @@
                 ? ((difficulties[difficulties.length - 1].difficulty - difficulties[difficulties.length - 2].difficulty) / difficulties[difficulties.length - 2].difficulty * 100)
                 : null;
 
-              // Fetch hashprice from HashrateIndex API
-              let hashpriceUsdPerThDay = null;
+              // Fetch hashprice from HashrateIndex API (HashrateIndex's own units, typically USD/PH/day)
+              let hashpriceUsd = null;
               let hashpriceChange = null;
               try {
                 const hpCurrentRes = await fetch('https://api.hashrateindex.com/v1/hashrateindex/hashprice/current');
@@ -112,7 +112,8 @@
                   // Schema: { "$schema": "...CurrentHashPriceData.json", data: { priceBTC, priceUSD, timestamp } }
                   const currentData = hpCurrent?.data || {};
                   if (typeof currentData.priceUSD === 'number') {
-                    hashpriceUsdPerThDay = currentData.priceUSD;
+                    // Use HashrateIndex's quoted USD value directly (e.g. ~$38.20)
+                    hashpriceUsd = currentData.priceUSD;
                   }
 
                   // For 24h change, fetch recent history and compare to ~24h ago
@@ -150,6 +151,11 @@
                           if (ref && ref.price > 0) {
                             hashpriceChange = ((latestPrice - ref.price) / ref.price) * 100;
                           }
+
+                          // If we still don't have a current price from /current, fall back to latest series point
+                          if (hashpriceUsd === null && typeof latestPrice === 'number') {
+                            hashpriceUsd = latestPrice;
+                          }
                         }
                       }
                     }
@@ -179,8 +185,14 @@
                 },
                 {
                   s: "Hashprice",
-                  p: hashpriceUsdPerThDay ? `$${hashpriceUsdPerThDay.toFixed(3)}/TH/day` : "N/A",
-                  c: hashpriceChange !== null ? `${hashpriceChange >= 0 ? '+' : ''}${hashpriceChange.toFixed(1)}%` : "",
+                  p:
+                    hashpriceUsd !== null && hashpriceUsd !== undefined
+                      ? `$${hashpriceUsd.toFixed(2)}`
+                      : "N/A",
+                  c:
+                    hashpriceChange !== null && hashpriceChange !== undefined
+                      ? `${hashpriceChange >= 0 ? '+' : ''}${hashpriceChange.toFixed(1)}%`
+                      : "",
                 },
               ]);
             } catch (e) {
