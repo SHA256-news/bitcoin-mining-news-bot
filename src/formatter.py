@@ -39,13 +39,11 @@ def sanitize_summary(
                 if t.lower() not in st and t.lower() not in {"the", "a", "an"}
             ]
             candidate = " ".join(cleaned).strip()
-            # If the aggressive removal degrades readability, fall back to a clear prefix
+            # If aggressive removal degrades readability, keep original without adding generic prefixes
             words = candidate.split()
-            if len(candidate) < 24 or len(words) < 4:
-                # Prefer a stable, human-readable prefix
-                prefix = "Bitcoin mining: "
-                candidate = (prefix + head).strip()
-            head = candidate[:80]
+            head = candidate if (len(candidate) >= 24 and len(words) >= 4) else head
+    # Allow a longer, more informative hook
+    head = head[:110]
 
     # Exact phrases and numbers to avoid in bullets
     headline_l = head.lower()

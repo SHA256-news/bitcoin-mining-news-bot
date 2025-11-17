@@ -105,9 +105,7 @@ def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
     if not api_key:
         # Offline fallback for dev
         logger.info("summarizer: no GOOGLE_API_KEY; using offline fallback")
-        h = title or "Bitcoin mining update"
-        if "mining" not in h.lower() and "miner" not in h.lower():
-            h = f"Bitcoin mining: {h}"[:80]
+        h = (title or "Update").strip()[:110]
         return (
             h,
             _heuristic_bullets(title, text),
@@ -119,9 +117,9 @@ def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
     user_prompt = f"""
 First, silently decide if this article is DIRECTLY RELEVANT to Bitcoin miners (mining operations, hashrate/difficulty, energy costs, ASIC/hardware, policy that impacts miners, miner revenue/hashprice). If not, set relevant=false and STOP.
 Then, if relevant=true, generate:
-- headline: catchy but factual, target 70–80 characters (no emojis), rephrase and do not repeat the article title; avoid reusing more than 60% of the original title's words; explicitly reference Bitcoin miners or Bitcoin mining.
-- bullets: exactly 3, <= 14 words each, no filler, no placeholders, no ellipses; do NOT end with punctuation unless it is a question mark for an open question; avoid repeating the same key word across bullets.
-Prioritize: hashrate/difficulty, energy/costs, ASIC/hardware, policy, miner revenue/hashprice.
+- headline: write a sharp 70–100 character hook (no emojis). Do NOT say "Bitcoin mining" or "Bitcoin miners" unless essential; instead, lead with the concrete outcome (beat/miss/guidance), key numbers, and the subject (e.g., company/ticker, capacity, margin, EH/s, MW). Rephrase and do not repeat the article title; avoid reusing >60% of its words.
+- bullets: exactly 3, <= 14 words each, no filler/placeholders/ellipses; no trailing periods. Each bullet should carry a distinct fact: production/units/EH/s or BTC; costs/margins/PPAs; policy/permits/deals/guidance.
+Prioritize: hashrate/difficulty, energy/costs, ASIC/hardware, policy, miner revenue/hashprice. Include the specific beat/miss vs forecasts when available.
 
 Title: {title}
 Article:
@@ -216,10 +214,8 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
                     _heuristic_bullets(title, text),
                 )
         else:
-            # On API failure, fallback but still ensure headline references mining
-            h = (title or "Bitcoin mining update").strip()
-            if "mining" not in h.lower() and "miner" not in h.lower():
-                h = f"Bitcoin mining: {h}"[:80]
+            # On API failure, fallback but still provide a usable headline
+            h = (title or "Update").strip()[:110]
             return (
                 h,
                 _heuristic_bullets(title, text),
@@ -238,10 +234,9 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
         norm = {b.lower() for b in bullets}
         if len(bullets) != 3 or any(x in norm for x in GENERIC_BULLETS) or not all(bullets):
             raise ValueError("generic or invalid bullets")
-        # enforce explicit mining reference in headline
-        head_l = headline.lower()
-        if not ("mining" in head_l or "miner" in head_l):
-            raise ValueError("headline lacks mining reference")
+        # ensure headline conveys a concrete outcome or number
+        if len(re.findall(r"\d", headline)) == 0 and not re.search(r"\b(beat|miss|record|guidance|surge|plunge|deal|contract)\b", headline, flags=re.I):
+            raise ValueError("headline lacks concrete hook")
         # Optional: trust but verify budget
         est = data.get("estimated_total_chars")
         if isinstance(est, int) and est > 260:
