@@ -173,3 +173,21 @@ def sync_posted_from_x(max_heads: int = 50) -> Dict:
 
     purged = purge_posted(event_hours=int(os.getenv("QUEUE_POST_EVENT_SKIP_HOURS", "168") or "168"))
     return {"synced": synced, "fallback_matched": fallback, "purged": purged}
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+    from dotenv import load_dotenv
+
+    # Load .env if present (no stack introspection)
+    load_dotenv(".env")
+    try:
+        summary = sync_posted_from_x()
+        print(json.dumps(summary))
+        if summary.get("reason") == "missing_x_creds":
+            sys.exit(2)
+        sys.exit(0)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}))
+        sys.exit(1)
