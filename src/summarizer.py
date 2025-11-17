@@ -235,7 +235,9 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
         if len(bullets) != 3 or any(x in norm for x in GENERIC_BULLETS) or not all(bullets):
             raise ValueError("generic or invalid bullets")
         # ensure headline conveys a concrete outcome or number
-        if len(re.findall(r"\d", headline)) == 0 and not re.search(r"\b(beat|miss|record|guidance|surge|plunge|deal|contract)\b", headline, flags=re.I):
+        if len(re.findall(r"\d", headline)) == 0 and not re.search(
+            r"\b(beat|miss|record|guidance|surge|plunge|deal|contract)\b", headline, flags=re.I
+        ):
             raise ValueError("headline lacks concrete hook")
         # Optional: trust but verify budget
         est = data.get("estimated_total_chars")

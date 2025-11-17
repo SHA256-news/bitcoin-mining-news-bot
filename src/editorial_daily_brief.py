@@ -204,7 +204,9 @@ Write the brief now. Use your knowledge to add depth beyond just the mining arti
     return post_filename
 
 
-def _generate_post_html(markdown_content: str, display_date: str, article_count: int, articles=None) -> str:
+def _generate_post_html(
+    markdown_content: str, display_date: str, article_count: int, articles=None
+) -> str:
     """Generate HTML for editorial blog post.
     - Strip a leading "# Daily Brief: ..." heading
     - Use prose-lg styling
@@ -213,13 +215,31 @@ def _generate_post_html(markdown_content: str, display_date: str, article_count:
     import re
 
     # 1) Strip redundant heading if present
-    markdown_content = re.sub(r"^\s*#\s*Daily\s*Brief:.*\n?", "", markdown_content, count=1, flags=re.IGNORECASE | re.MULTILINE)
+    markdown_content = re.sub(
+        r"^\s*#\s*Daily\s*Brief:.*\n?",
+        "",
+        markdown_content,
+        count=1,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
 
     # 2) Convert headers
     html_content = markdown_content
-    html_content = re.sub(r"^# (.+)$", r'<h1 class="font-serif text-3xl sm:text-4xl mb-6">\1</h1>', html_content, flags=re.MULTILINE)
-    html_content = re.sub(r"^## (.+)$", r'<h2 class="font-serif text-2xl mb-4 mt-8">\1</h2>', html_content, flags=re.MULTILINE)
-    html_content = re.sub(r"^\*\*(.+?)\*\*:", r"<strong>\1</strong>:", html_content, flags=re.MULTILINE)
+    html_content = re.sub(
+        r"^# (.+)$",
+        r'<h1 class="font-serif text-3xl sm:text-4xl mb-6">\1</h1>',
+        html_content,
+        flags=re.MULTILINE,
+    )
+    html_content = re.sub(
+        r"^## (.+)$",
+        r'<h2 class="font-serif text-2xl mb-4 mt-8">\1</h2>',
+        html_content,
+        flags=re.MULTILINE,
+    )
+    html_content = re.sub(
+        r"^\*\*(.+?)\*\*:", r"<strong>\1</strong>:", html_content, flags=re.MULTILINE
+    )
 
     # 3) Paragraphs/line breaks
     html_content = html_content.replace("\n\n", "</p><p>")
@@ -251,7 +271,12 @@ def _generate_post_html(markdown_content: str, display_date: str, article_count:
             if "mara" in t:
                 link_map.setdefault("MARA", url)
         for term, url in link_map.items():
-            html_content = re.sub(rf"(?<![\w-])({re.escape(term)})(?![\w-])", rf'<a href="{url}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 underline">\1</a>', html_content, count=1)
+            html_content = re.sub(
+                rf"(?<![\w-])({re.escape(term)})(?![\w-])",
+                rf'<a href="{url}" target="_blank" rel="noopener noreferrer" class="text-emerald-400 underline">\1</a>',
+                html_content,
+                count=1,
+            )
 
     return f"""<!doctype html>
 <html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n    <title>Daily Brief - {display_date} | SHA256 News</title>\n    <meta name=\"description\" content=\"Bitcoin mining daily editorial brief for {display_date}\" />\n    <script src=\"https://cdn.tailwindcss.com\"></script>\n    <style>\n      :root {{ color-scheme: dark; }}\n      html, body {{ height: 100%; }}\n      .font-serif {{ font-family: ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif; }}\n    </style>\n  </head>\n  <body class=\"bg-zinc-950 text-zinc-100\">\n    <div class=\"min-h-screen bg-zinc-950 text-zinc-100 flex flex-col\">\n      <header class=\"border-b border-zinc-800\">\n        <div class=\"mx-auto max-w-3xl px-4 sm:px-6 lg:px-8\">\n          <div class=\"py-6 text-center\">\n            <h1 class=\"font-serif text-4xl sm:text-5xl\"><a href=\"/\" class=\"hover:text-zinc-300\">SHA256 News</a></h1>\n            <div class=\"mt-2 text-[11px] tracking-widest uppercase text-zinc-400\">\n              Bitcoin Mining • Editorial Brief\n            </div>\n          </div>\n        </div>\n      </header>\n      \n      <main class=\"flex-1 mx-auto w-full max-w-3xl px-4 sm:px-6 lg:px-8 py-12\">\n        <article class=\"prose prose-lg prose-invert prose-zinc max-w-none\">\n          <p>{html_content}</p>\n        </article>\n        \n        <div class=\"mt-12 pt-8 border-t border-zinc-800 text-center\">\n          <a href=\"/\" class=\"text-zinc-400 underline hover:text-zinc-100\">← Back to Home</a>\n        </div>\n      </main>\n      \n      <footer class=\"border-t border-zinc-800 py-6 text-sm text-zinc-400 text-center\">\n        <div>© {datetime.datetime.utcnow().year} SHA256 Media — Bitcoin Mining Only</div>\n      </footer>\n    </div>\n  </body>\n</html>"""
