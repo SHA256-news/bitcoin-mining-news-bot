@@ -65,7 +65,7 @@
           { s: "BTC", p: "Loading...", c: "" },
           { s: "Mining Difficulty", p: "Loading...", c: "" },
           { s: "Network Hashrate", p: "Loading...", c: "" },
-          { s: "Hashprice (est.)", p: "Loading...", c: "" },
+          { s: "Hashprice", p: "Loading...", c: "" },
         ]);
         const [loading, setLoading] = useState(true);
 
@@ -87,18 +87,6 @@
               // Hashrate in H/s, convert to ZH/s (Zetahash = 1e21)
               const hashrateZH = (mempoolData.currentHashrate / 1e21).toFixed(2);
 
-              // Estimate network hashprice in USD/TH/day from subsidy only
-              // Hashprice ≈ (block_reward_BTC * blocks_per_day * BTC_price) / network_hashrate_THs
-              const hashrateTHs = mempoolData.currentHashrate / 1e12;
-              const blockSubsidyBtc = 3.125; // current BTC block subsidy (post-2024 halving)
-              const blocksPerDay = 144;
-              const networkRewardBtcPerDay = blockSubsidyBtc * blocksPerDay;
-              const networkRewardUsdPerDay = btcPrice ? networkRewardBtcPerDay * btcPrice : null;
-              const hashpriceUsdPerThDay =
-                networkRewardUsdPerDay && hashrateTHs
-                  ? networkRewardUsdPerDay / hashrateTHs
-                  : null;
-              
               // Calculate 24h change from hashrates array (compare current to 24h ago)
               const hashrates = mempoolData.hashrates || [];
               const now = Date.now() / 1000;
@@ -108,23 +96,70 @@
                 ? ((mempoolData.currentHashrate - dayAgoHashrate.avgHashrate) / dayAgoHashrate.avgHashrate * 100)
                 : null;
 
-              // Approximate 24h hashprice change from BTC price and hashrate changes
-              // hashprice ∝ BTC_price / hashrate, so:
-              //   (1 + hpΔ) ≈ (1 + btcΔ) / (1 + hrΔ)
-              let hashpriceChange = null;
-              if (typeof btcChange === 'number' && hashrateChange !== null) {
-                const btcFactor = 1 + btcChange / 100;
-                const hrFactor = 1 + hashrateChange / 100;
-                if (btcFactor > 0 && hrFactor > 0) {
-                  hashpriceChange = ((btcFactor / hrFactor) - 1) * 100;
-                }
-              }
-              
               // Get difficulty change from difficulty array
               const difficulties = mempoolData.difficulty || [];
               const diffChange = difficulties.length >= 2 
                 ? ((difficulties[difficulties.length - 1].difficulty - difficulties[difficulties.length - 2].difficulty) / difficulties[difficulties.length - 2].difficulty * 100)
                 : null;
+
+              // Fetch hashprice from HashrateIndex API
+              let hashpriceUsdPerThDay = null;
+              let hashpriceChange = null;
+              try {
+                const hpCurrentRes = await fetch('https://api.hashrateindex.com/v1/hashrateindex/hashprice/current');
+                if (hpCurrentRes.ok) {
+                  const hpCurrent = await hpCurrentRes.json();
+                  // Schema: { "$schema": "...CurrentHashPriceData.json", data: { priceBTC, priceUSD, timestamp } }
+                  const currentData = hpCurrent?.data || {};
+                  if (typeof currentData.priceUSD === 'number') {
+                    hashpriceUsdPerThDay = currentData.priceUSD;
+                  }
+
+                  // For 24h change, fetch recent history and compare to ~24h ago
+                  try {
+                    const hpSeriesRes = await fetch('https://api.hashrateindex.com/v1/hashrateindex/hashprice');
+                    if (hpSeriesRes.ok) {
+                      const hpSeries = await hpSeriesRes.json();
+                      const series = Array.isArray(hpSeries?.data) ? hpSeries.data : hpSeries;
+                      if (Array.isArray(series) && series.length >= 2) {
+                        // Assume same { priceUSD, timestamp } shape for each point
+                        const latest = series[series.length - 1];
+                        const latestTs = latest.timestamp ? Date.parse(latest.timestamp) : null;
+                        const latestPrice = typeof latest.priceUSD === 'number' ? latest.priceUSD : null;
+                        if (latestTs && latestPrice) {
+                          const dayAgoMs = latestTs - 24 * 60 * 60 * 1000;
+                          let ref = null;
+                          for (let i = series.length - 2; i >= 0; i -= 1) {
+                            const pt = series[i];
+                            const ts = pt.timestamp ? Date.parse(pt.timestamp) : null;
+                            const price = typeof pt.priceUSD === 'number' ? pt.priceUSD : null;
+                            if (ts && price && ts <= dayAgoMs) {
+                              ref = { ts, price };
+                              break;
+                            }
+                          }
+                          if (!ref) {
+                            // Fallback: use the earliest point as reference
+                            const first = series[0];
+                            const firstPrice = typeof first.priceUSD === 'number' ? first.priceUSD : null;
+                            const firstTs = first.timestamp ? Date.parse(first.timestamp) : null;
+                            if (firstTs && firstPrice && firstTs < latestTs) {
+                              ref = { ts: firstTs, price: firstPrice };
+                            }
+                          }
+                          if (ref && ref.price > 0) {
+                            hashpriceChange = ((latestPrice - ref.price) / ref.price) * 100;
+                          }
+                        }
+                      }
+                    }
+                  } catch (err) {
+                    console.error('Error fetching hashprice history:', err);
+                  }
+                }
+              } catch (err) {
+                console.error('Error fetching hashprice from HashrateIndex:', err);
+              }
 
               setMarkets([
                 {
@@ -143,7 +178,7 @@
                   c: hashrateChange !== null ? `${hashrateChange >= 0 ? '+' : ''}${hashrateChange.toFixed(1)}%` : ""
                 },
                 {
-                  s: "Hashprice (est.)",
+                  s: "Hashprice",
                   p: hashpriceUsdPerThDay ? `$${hashpriceUsdPerThDay.toFixed(3)}/TH/day` : "N/A",
                   c: hashpriceChange !== null ? `${hashpriceChange >= 0 ? '+' : ''}${hashpriceChange.toFixed(1)}%` : "",
                 },
@@ -155,7 +190,7 @@
                 { s: "BTC", p: "$95,000", c: "" },
                 { s: "Mining Difficulty", p: "109 T", c: "" },
                 { s: "Network Hashrate", p: "1.11 ZH/s", c: "" },
-                { s: "Hashprice (est.)", p: "$0.070/TH/day", c: "" },
+                { s: "Hashprice", p: "$0.070/TH/day", c: "" },
               ]);
             } finally {
               setLoading(false);
