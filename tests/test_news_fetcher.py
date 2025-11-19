@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.news_fetcher import (
+from src.news_fetcher import (  # noqa: E402
     _pick_best,
     _get_concept_uris,
     _get_trending_score,

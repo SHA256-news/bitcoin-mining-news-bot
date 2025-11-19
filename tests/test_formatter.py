@@ -3,7 +3,12 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.formatter import compose_tweet_1, compose_tweet_2, MAX_TWEET_LEN, sanitize_summary
+from src.formatter import (
+    compose_tweet_1,
+    compose_tweet_2,
+    MAX_TWEET_LEN,
+    sanitize_summary,
+)  # noqa: E402
 
 
 def test_compose_tweet_1_basic():

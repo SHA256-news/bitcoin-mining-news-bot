@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.publisher import publish
+from src.publisher import publish  # noqa: E402
 
 
 def test_publish_dry_run(monkeypatch, capsys):

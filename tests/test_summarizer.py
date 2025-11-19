@@ -3,7 +3,7 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.summarizer import summarize_for_miners
+from src.summarizer import summarize_for_miners  # noqa: E402
 
 
 def test_summarizer_offline_fallback(monkeypatch):
