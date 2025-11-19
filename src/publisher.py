@@ -16,6 +16,7 @@ def _has_x_credentials() -> bool:
     required = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
     return all(os.getenv(k) for k in required)
 
+
 def _truthy(val: str | None) -> bool:
     if not val:
         return False

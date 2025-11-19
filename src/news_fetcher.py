@@ -25,6 +25,7 @@ def _er_get(url: str, params: Dict, timeout: int = 20, context: str = "api") -> 
         logger.warning("eventregistry: %s request failed: %s", context, e)
     return None
 
+
 def _session() -> requests.Session:
     s = requests.Session()
     retries = Retry(
@@ -723,12 +724,9 @@ def _log_fetch_metrics(
     trending: Dict,
 ) -> None:
     """Log summary metrics about fetched and deduplicated articles."""
-    avg_social = (
-        sum(a.get("social_score", 0) for a in picked) / len(picked) if picked else 0
-    )
+    avg_social = sum(a.get("social_score", 0) for a in picked) / len(picked) if picked else 0
     avg_sentiment = (
-        sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None)
-        / len(picked)
+        sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None) / len(picked)
         if picked
         else 0
     )

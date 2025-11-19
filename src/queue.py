@@ -101,7 +101,7 @@ def remove_by_url(url: str) -> int:
     url_l = (url or "").strip()
 
     def bad(it: dict) -> bool:
-        return (it.get("url", "").strip() == url_l)
+        return it.get("url", "").strip() == url_l
 
     return _filter_queue(bad)
 
