@@ -133,6 +133,8 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     if not tid1:
         logger.warning("publisher: failed to create first tweet: %s", err or "unknown error")
         return "", ""
+    
+    logger.info("publisher: Tweet 1 posted (id=%s). Posting reply...", tid1)
 
     # Reply with second tweet (URL) (also retry once on rate limit)
     tid2, err2 = _maybe_retry_rate_limited(
@@ -141,5 +143,14 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
     )
     if err2:
         logger.warning("publisher: failed to create reply tweet: %s", err2)
+        # Rollback: attempt to delete the first tweet so we don't leave a half-thread
+        try:
+            logger.info("publisher: attempting rollback (deleting tweet %s)", tid1)
+            client.delete_tweet(tid1)
+            logger.info("publisher: rollback successful")
+        except Exception as e:
+            logger.error("publisher: rollback failed for tweet %s: %s", tid1, e)
+        # Return empty so main.py knows it failed and can retry later
+        return "", ""
 
     return tid1, tid2
