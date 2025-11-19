@@ -589,7 +589,7 @@ def _fetch_minute_stream_articles(
     return []
 
 
-def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
+def _build_article_from_er(a: Dict) -> Dict | None:
     import datetime as _dt
 
     # Compute max age in hours: prefer ARTICLES_MAX_HOURS, else ARTICLES_MAX_DAYS*24 (default 24h)
@@ -656,21 +656,6 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
             # If parsing fails, continue (will be constrained by API dateStart)
             pass
 
-    # Attempt Event Registry extractArticleInfo ONLY (no raw HTML parsing)
-    if (not art["text"]) or len(art["text"]) < 500:
-        if url:
-            try:
-                ext_url = "https://analytics.eventregistry.org/api/v1/extractArticleInfo"
-                er = _session().get(ext_url, params={"apiKey": api_key, "url": url}, timeout=15)
-                if er.ok:
-                    ej = er.json() or {}
-                    body = ej.get("body") or ""
-                    if body and len(body) > len(art["text"]):
-                        art["text"] = body
-                else:
-                    _log_er_error(er, "extractArticleInfo")
-            except Exception as e:
-                logger.debug("news_fetcher: extractArticleInfo failed for %s: %s", url, e)
     # Drop if hard-banned by domain or keyword
     url_str = art.get("url", "")
     host = _domain(urlparse(url_str).netloc)
@@ -690,6 +675,32 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
     # compute fingerprint once text is final
     art["fingerprint"] = _fingerprint(art)
     return art
+
+
+def _enrich_article_body_if_needed(art: Dict, api_key: str) -> None:
+    """Optionally call Event Registry extractArticleInfo for a small set of final candidates.
+
+    This is called only for the deduplicated articles we are about to use, to
+    avoid spending extract quota on every raw result.
+    """
+    url = art.get("url") or ""
+    if not url:
+        return
+    # Skip if we already have a sufficiently long body
+    if art.get("text") and len(art["text"]) >= 500:
+        return
+    try:
+        ext_url = "https://analytics.eventregistry.org/api/v1/extractArticleInfo"
+        er = _session().get(ext_url, params={"apiKey": api_key, "url": url}, timeout=15)
+        if er.ok:
+            ej = er.json() or {}
+            body = ej.get("body") or ""
+            if body and len(body) > len(art.get("text", "")):
+                art["text"] = body
+        else:
+            _log_er_error(er, "extractArticleInfo")
+    except Exception as e:
+        logger.debug("news_fetcher: extractArticleInfo failed for %s: %s", url, e)
 
 
 def _group_articles_by_event_or_fingerprint(articles: List[Dict]) -> Dict[str, List[Dict]]:
@@ -853,8 +864,9 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             trending["average"],
         )
 
-    # Optional minuteStream fast-path (for spikes or when enabled)
-    use_stream = _truthy(os.getenv("USE_MINUTE_STREAM")) or trending.get("is_spike")
+    # Optional minuteStream fast-path (only when explicitly enabled)
+    # Note: we do NOT auto-enable this on spikes to keep Event Registry usage predictable.
+    use_stream = _truthy(os.getenv("USE_MINUTE_STREAM"))
     stream_minutes = int(os.getenv("MINUTE_STREAM_MINS", "3") or "3")
     event_uris: List[str] = []
     stream_raw: List[Dict] = []
@@ -873,14 +885,14 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
         raw_total = 0
         seen_uris: set[str] = set()
         picked: List[Dict] = []
-        # paginate a few pages to collect enough unique events
+        # paginate a small number of pages to collect enough unique events
         # If minute stream returned items, process those first
         search_batches = []
         if stream_raw:
             search_batches.append(("minuteStream", stream_raw))
-        # Paginated getArticles results next
-        for page in range(1, 6):
-            params = {**base_params, "articlesPage": page, "articlesCount": 50}
+        # Paginated getArticles results next (1–2 pages max)
+        for page in range(1, 3):
+            params = {**base_params, "articlesPage": page, "articlesCount": 3}
             data = _er_get(url, params=params, timeout=20, context="getArticles")
             if not data:
                 continue
@@ -898,13 +910,22 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     continue
                 seen_uris.add(uri)
 
-                art = _build_article_from_er(a, api_key)
+                art = _build_article_from_er(a)
                 if art:
                     articles.append(art)
             # Deduplicate by fingerprint first (most specific), with event_uri as secondary grouping
             # This allows multiple articles per event if they have different fingerprints
             grouped = _group_articles_by_event_or_fingerprint(articles)
             picked = _pick_group_representatives(grouped, limit)
+
+        # Enrich final picked articles with full body only when we are about to use them.
+        # To keep Event Registry extractArticleInfo usage bounded, cap per-run enriches.
+        try:
+            max_enrich = int(os.getenv("EXTRACT_MAX_PER_RUN", "3") or "3")
+        except Exception:
+            max_enrich = 3
+        for art in picked[:max_enrich]:
+            _enrich_article_body_if_needed(art, api_key)
 
         # Log summary with new metrics (including spike info and dates)
         logger.info(
