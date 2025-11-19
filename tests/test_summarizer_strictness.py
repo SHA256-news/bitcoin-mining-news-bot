@@ -1,10 +1,12 @@
 from src.summarizer import summarize_for_miners
 from unittest.mock import patch
 
+
 @patch("src.summarizer._call_gemini")
 @patch("src.summarizer.get_cached_summary")
 def test_summarizer_strictness(mock_get_cache, mock_call_gemini):
     import os
+
     os.environ["GOOGLE_API_KEY"] = "fake"
     mock_get_cache.return_value = None
     # Mock Gemini response with a valid but "numberless" headline
@@ -13,14 +15,14 @@ def test_summarizer_strictness(mock_get_cache, mock_call_gemini):
     article = {
         "title": "Miners expand",
         "text": "Bitcoin miners are expanding in Texas.",
-        "fingerprint": "fp1"
+        "fingerprint": "fp1",
     }
 
     # This should NOT raise ValueError if we relax the check, but currently it might
     # We expect it to return the fallback (heuristic) if it fails validation
     headline, bullets = summarize_for_miners(article)
-    
+
     # If validation fails, it falls back to heuristic which uses the title "Miners expand"
     # If validation passes, it uses the Gemini headline "Bitcoin miners expand operations in Texas"
-    
+
     assert headline == "Bitcoin miners expand operations in Texas"
