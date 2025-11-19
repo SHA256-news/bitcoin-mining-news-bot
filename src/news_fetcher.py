@@ -334,9 +334,16 @@ def _numbers_and_units(text: str) -> list[str]:
         r"\b\d+\.?\d*\s*(mw|gw|eh/s|zh/s|th/s)\b",
     ]:
         parts += re.findall(pat, s)
-    # Also keep raw numbers of key sizes
+    # Also keep raw numbers of key sizes, but exclude likely years (19xx, 20xx) unless they are clearly not years
+    # We'll just exclude 4-digit numbers starting with 19 or 20 for simplicity in this context
     nums = re.findall(r"\b\d{2,}\b", s)
-    parts += nums[:5]
+    filtered_nums = []
+    for n in nums:
+        # Skip likely years
+        if len(n) == 4 and (n.startswith("19") or n.startswith("20")):
+            continue
+        filtered_nums.append(n)
+    parts += filtered_nums[:5]
     return list(dict.fromkeys(parts))[:10]
 
 

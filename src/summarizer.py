@@ -251,10 +251,18 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
         if len(bullets) != 3 or any(x in norm for x in GENERIC_BULLETS) or not all(bullets):
             raise ValueError("generic or invalid bullets")
         # ensure headline conveys a concrete outcome or number
-        if len(re.findall(r"\d", headline)) == 0 and not re.search(
-            r"\b(beat|miss|record|guidance|surge|plunge|deal|contract)\b", headline, flags=re.I
-        ):
-            raise ValueError("headline lacks concrete hook")
+        # Relaxed: allow if it has numbers OR if it has strong keywords
+        has_number = len(re.findall(r"\d", headline)) > 0
+        has_keyword = bool(re.search(
+            r"\b(beat|miss|record|guidance|surge|plunge|deal|contract|open|opens|expand|expands|launch|launches|partner|partners|secure|secures|approve|approves|ban|bans|tax|taxes)\b",
+            headline,
+            flags=re.I
+        ))
+        
+        if not has_number and not has_keyword:
+             # Fallback for very generic headlines that might still be useful if they aren't just "Bitcoin mining update"
+             if len(headline.split()) < 4 or headline.lower() in ["bitcoin mining update", "market update", "mining news"]:
+                raise ValueError("headline lacks concrete hook")
         # Optional: trust but verify budget
         est = data.get("estimated_total_chars")
         if isinstance(est, int) and est > 260:

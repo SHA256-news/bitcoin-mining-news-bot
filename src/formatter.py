@@ -78,6 +78,10 @@ def sanitize_summary(
     cleaned: list[str] = []
     seen_bullets: set[str] = set()
     kept_nums_once = False
+
+    # Precompute headline tokens for prefix-duplication cleanup in bullets
+    head_tokens = re.findall(r"[A-Za-z0-9$€£]+", head.lower()) if head else []
+
     for b in bullets:
         s = (b or "").strip()
         if not s:
@@ -85,6 +89,19 @@ def sanitize_summary(
         # Remove trailing punctuation except ?
         if s.endswith((".", "!", ";", ":")):
             s = s.rstrip(".!;:")
+
+        # If the bullet starts by repeating the headline phrase, strip that prefix
+        if head_tokens:
+            b_tokens = re.findall(r"[A-Za-z0-9$€£]+", s.lower())
+            if b_tokens:
+                # Compare first few tokens for overlap
+                k = min(6, len(head_tokens), len(b_tokens))
+                if k >= 3 and b_tokens[:k] == head_tokens[:k]:
+                    # Drop that many tokens from the original bullet
+                    original_parts = s.split()
+                    if len(original_parts) > k:
+                        s = " ".join(original_parts[k:]).lstrip(",: ") or s
+
         # Decide if this bullet can keep headline numbers
         allow_nums = (not kept_nums_once) and any((n in s) for n in headline_nums)
         if allow_nums:
