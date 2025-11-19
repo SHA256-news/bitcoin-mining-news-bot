@@ -1,6 +1,5 @@
-import pytest
 from src.summarizer import summarize_for_miners
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 @patch("src.summarizer._call_gemini")
 @patch("src.summarizer.get_cached_summary")
