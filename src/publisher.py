@@ -11,6 +11,11 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 
+def _has_x_credentials() -> bool:
+    """Return True when all required X (Twitter) credentials are present."""
+    required = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
+    return all(os.getenv(k) for k in required)
+
 def _truthy(val: str | None) -> bool:
     if not val:
         return False
@@ -18,8 +23,8 @@ def _truthy(val: str | None) -> bool:
 
 
 def _client():
-    # DRY-RUN short-circuit
-    if _truthy(os.getenv("DRY_RUN")):
+    # DRY-RUN or missing dependencies short-circuit
+    if _truthy(os.getenv("DRY_RUN")) or not tweepy or not _has_x_credentials():
         return None
 
     x_api_key = os.getenv("X_API_KEY")
@@ -28,8 +33,6 @@ def _client():
     x_access_token_secret = os.getenv("X_ACCESS_TOKEN_SECRET")
 
     # Use Tweepy v2 Client (Free tier supports create_tweet)
-    if not all([x_api_key, x_api_secret, x_access_token, x_access_token_secret, tweepy]):
-        return None
 
     try:
         client = tweepy.Client(
@@ -132,7 +135,8 @@ def publish(tweet1: str, tweet2: str) -> Tuple[str, str]:
 
     # Reply with second tweet (URL) (also retry once on rate limit)
     tid2, err2 = _maybe_retry_rate_limited(
-        client, {"text": tweet2, "in_reply_to_tweet_id": tid1, "user_auth": True}
+        client,
+        {"text": tweet2, "in_reply_to_tweet_id": tid1, "user_auth": True},
     )
     if err2:
         logger.warning("publisher: failed to create reply tweet: %s", err2)

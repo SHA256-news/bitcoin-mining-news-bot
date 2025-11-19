@@ -81,6 +81,75 @@ def _heuristic_bullets(title: str, text: str) -> list[str]:
     return [p[:180] for p in picks[:3]]
 
 
+def _throttle(model_name: str) -> None:
+    """Rate-limit Gemini calls per-model using simple in-process timestamps.
+
+    This preserves the existing behavior while making the throttling reusable.
+    """
+    rpm_defaults = {
+        "gemini-2.5-pro": int(os.getenv("GEMINI_PRO_RPM", "2")),
+        "gemini-2.5-flash": int(os.getenv("GEMINI_FLASH_RPM", "10")),
+    }
+    rpm = rpm_defaults.get(model_name, 10)
+    # minimal inter-call delay in seconds
+    min_gap = max(0.0, 60.0 / max(1, rpm))
+    last_key = f"_last_call_{model_name}"
+    last = globals().get(last_key, 0.0)
+    now = time.time()
+    sleep_s = last + min_gap - now
+    if sleep_s > 0:
+        time.sleep(sleep_s)
+    globals()[last_key] = time.time()
+
+
+def _call_gemini(
+    model_name: str,
+    api_key: str | None,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    """Call Gemini with JSON response, budget checks, throttle, and single retry.
+
+    The logic is factored out of summarize_for_miners but kept bit-for-bit
+    compatible with the previous implementation.
+    """
+    if gemini_remaining(model_name) <= 0:
+        raise RuntimeError(f"no remaining daily budget for {model_name}")
+    _throttle(model_name)
+    client = genai.Client(api_key=api_key) if api_key else genai.Client()
+    config = types.GenerateContentConfig(
+        temperature=0.4,
+        response_mime_type="application/json",
+    )
+    try:
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=[system_prompt, user_prompt],
+            config=config,
+        )
+        gemini_increment(model_name)
+        return resp.text or "{}"
+    except Exception as e:
+        msg = str(e)
+        # Parse retry delay seconds if present
+        m = re.search(r"retry in (\d+(?:\.\d+)?)s|seconds: (\d+)", msg, flags=re.I)
+        if m:
+            try:
+                secs = float(next(g for g in m.groups() if g))
+                time.sleep(min(secs, 30.0))
+            except Exception:
+                time.sleep(30)
+            # single retry
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=[system_prompt, user_prompt],
+                config=config,
+            )
+            gemini_increment(model_name)
+            return resp.text or "{}"
+        raise
+
+
 def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
     """
     Returns (headline, bullets[3]) tailored for Bitcoin miners.
@@ -129,59 +198,6 @@ Respond ONLY as JSON with keys: relevant (boolean), headline (string when releva
 If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do not use ellipses. Do not end bullets with periods.
 """
 
-    def _throttle(model_name: str):
-        rpm_defaults = {
-            "gemini-2.5-pro": int(os.getenv("GEMINI_PRO_RPM", "2")),
-            "gemini-2.5-flash": int(os.getenv("GEMINI_FLASH_RPM", "10")),
-        }
-        rpm = rpm_defaults.get(model_name, 10)
-        # minimal inter-call delay in seconds
-        min_gap = max(0.0, 60.0 / max(1, rpm))
-        last_key = f"_last_call_{model_name}"
-        last = globals().get(last_key, 0.0)
-        now = time.time()
-        sleep_s = last + min_gap - now
-        if sleep_s > 0:
-            time.sleep(sleep_s)
-        globals()[last_key] = time.time()
-
-    def _call(model_name: str, sys: str, usr: str) -> str:
-        if gemini_remaining(model_name) <= 0:
-            raise RuntimeError(f"no remaining daily budget for {model_name}")
-        _throttle(model_name)
-        client = genai.Client(api_key=api_key) if api_key else genai.Client()
-        config = types.GenerateContentConfig(
-            temperature=0.4,
-            response_mime_type="application/json",
-        )
-        try:
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=[sys, usr],
-                config=config,
-            )
-            gemini_increment(model_name)
-            return resp.text or "{}"
-        except Exception as e:
-            msg = str(e)
-            # Parse retry delay seconds if present
-            m = re.search(r"retry in (\d+(?:\.\d+)?)s|seconds: (\d+)", msg, flags=re.I)
-            if m:
-                try:
-                    secs = float(next(g for g in m.groups() if g))
-                    time.sleep(min(secs, 30.0))
-                except Exception:
-                    time.sleep(30)
-                # single retry
-                resp = client.models.generate_content(
-                    model=model_name,
-                    contents=[sys, usr],
-                    config=config,
-                )
-                gemini_increment(model_name)
-                return resp.text or "{}"
-            raise
-
     # choose model: prefer pro if allowed; otherwise flash
     chosen_model = (
         model_name_pro if prefer_pro and gemini_remaining(model_name_pro) > 0 else model_name_flash
@@ -196,13 +212,13 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
     )
 
     try:
-        content = _call(chosen_model, system_prompt, user_prompt)
+        content = _call_gemini(chosen_model, api_key, system_prompt, user_prompt)
     except Exception as e:
         logger.warning("summarizer: API error: %s; falling back", e)
         # fallback to flash if not already
         if chosen_model != model_name_flash:
             try:
-                content = _call(model_name_flash, system_prompt, user_prompt)
+                content = _call_gemini(model_name_flash, api_key, system_prompt, user_prompt)
             except Exception as e2:
                 logger.warning("summarizer: flash fallback failed: %s", e2)
                 # On API failure, fallback but still ensure headline references mining

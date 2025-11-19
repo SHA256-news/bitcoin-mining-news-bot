@@ -71,18 +71,17 @@ def _posted_load() -> Dict:
     st = _load()
     items: List[Dict] = []
     now = _now_ts()
-    for u in st.get("posted_urls") or []:
-        if isinstance(u, dict) and u.get("url"):
-            items.append({"url": str(u.get("url")), "ts": int(u.get("ts", now))})
-    for e in st.get("posted_events") or []:
-        if isinstance(e, dict) and e.get("event"):
-            items.append({"event_uri": str(e.get("event")), "ts": int(e.get("ts", now))})
-    for a in st.get("posted_article_uris") or []:
-        if isinstance(a, dict) and a.get("article_uri"):
-            items.append({"article_uri": str(a.get("article_uri")), "ts": int(a.get("ts", now))})
-    for f in st.get("posted_fingerprints") or []:
-        if isinstance(f, dict) and f.get("fp"):
-            items.append({"fingerprint": str(f.get("fp")), "ts": int(f.get("ts", now))})
+
+    def _migrate_seq(seq_key: str, field_in: str, field_out: str) -> None:
+        for obj in st.get(seq_key) or []:
+            if isinstance(obj, dict) and obj.get(field_in):
+                items.append({field_out: str(obj.get(field_in)), "ts": int(obj.get("ts", now))})
+
+    _migrate_seq("posted_urls", "url", "url")
+    _migrate_seq("posted_events", "event", "event_uri")
+    _migrate_seq("posted_article_uris", "article_uri", "article_uri")
+    _migrate_seq("posted_fingerprints", "fp", "fingerprint")
+
     return {"items": items}
 
 
@@ -183,6 +182,16 @@ def already_posted(
 
     return False
 
+
+def _posted_identity_equal(a: Dict, b: Dict) -> bool:
+    """Return True when two posted entries refer to the same underlying item.
+
+    Identity is any matching non-empty value among article_uri, event_uri,
+    fingerprint or url. This is used consistently for mark_posted dedup.
+    """
+    for k in ("article_uri", "event_uri", "fingerprint", "url"):
+        if a.get(k) and b.get(k) and a.get(k) == b.get(k):
+            return True
     return False
 
 
@@ -208,13 +217,7 @@ def mark_posted(
         entry["fingerprint"] = fingerprint
 
     # Deduplicate by any present key
-    def _same(a: Dict, b: Dict) -> bool:
-        for k in ("article_uri", "event_uri", "fingerprint", "url"):
-            if a.get(k) and b.get(k) and a.get(k) == b.get(k):
-                return True
-        return False
-
-    items = [it for it in items if not _same(it, entry)]
+    items = [it for it in items if not _posted_identity_equal(it, entry)]
     items.append(entry)
     if len(items) > max_entries:
         items = items[-max_entries:]
@@ -253,7 +256,7 @@ def set_cached_summary(
 def _today() -> str:
     import datetime as _dt
 
-    return _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    return _dt.date.today().strftime("%Y-%m-%d")
 
 
 def _ensure_usage_day(state: Dict) -> None:

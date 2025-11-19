@@ -10,6 +10,21 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 
+def _er_get(url: str, params: Dict, timeout: int = 20, context: str = "api") -> Dict | None:
+    """Thin wrapper around Event Registry GET requests.
+
+    Centralizes retries, error logging and JSON handling while preserving
+    existing behavior in the callers.
+    """
+    try:
+        resp = _session().get(url, params=params, timeout=timeout)
+        if getattr(resp, "ok", False):
+            return resp.json() or {}
+        _log_er_error(resp, context)
+    except Exception as e:
+        logger.warning("eventregistry: %s request failed: %s", context, e)
+    return None
+
 def _session() -> requests.Session:
     s = requests.Session()
     retries = Retry(
@@ -61,17 +76,23 @@ def _log_er_error(resp: requests.Response, context: str = "") -> None:
 
 
 def _is_btc_sha256_article(article: Dict) -> bool:
-    """Return True if article is Bitcoin-only SHA-256 mining related.
-    Rules:
-    - Must mention bitcoin or btc AND one of: mining/miner/sha-256/sha256/asic/hashrate/difficulty.
-    - Must NOT mention: cloud mining, ethereum/eth, litecoin/ltc, dogecoin, gpu.
+    """Return True if article is Bitcoin-only SHA-256 mining *or* clearly miner-relevant context.
+
+    Rules (conservative but broader than just public miner headlines):
+    - Must NOT be about altcoins (ethereum/eth, ltc, dogecoin, cloud mining, etc.).
+    - Primary path (direct mining):
+      * mentions "bitcoin" or "btc" AND
+      * at least one of: mining/miner/sha-256/sha256/asic/hashrate/difficulty.
+    - Secondary path (energy/policy context):
+      * mentions "bitcoin" or "btc" AND
+      * at least one energy/power/grid token, OR
+      * mentions mining/ASIC/hashrate together with energy/power/grid tokens.
     """
     title = (article.get("title") or "").lower()
     text = (article.get("text") or "").lower()
     blob = f"{title} {text}"
 
-    if not ("bitcoin" in blob or " btc" in blob or "btc " in blob):
-        return False
+    has_btc = "bitcoin" in blob or " btc" in blob or "btc " in blob
 
     include_tokens = [
         "mining",
@@ -83,9 +104,32 @@ def _is_btc_sha256_article(article: Dict) -> bool:
         "hashrate",
         "difficulty",
     ]
-    if not any(tok in blob for tok in include_tokens):
-        return False
+    has_mining = any(tok in blob for tok in include_tokens)
 
+    energy_tokens = [
+        "energy",
+        "electricity",
+        "power grid",
+        "grid operator",
+        "power prices",
+        "electricity prices",
+        "power cost",
+        "electricity cost",
+        "data center",
+        "data centres",
+        "data centers",
+        "data-centre",
+        "data-centers",
+        "department of energy",
+        " doe ",
+        "energy ministry",
+        "ministry of energy",
+        "tenaga nasional",
+        " tnb ",
+    ]
+    has_energy = any(tok in blob for tok in energy_tokens)
+
+    # Exclude obvious non-Bitcoin or cloud/tokenization content
     exclude_tokens = [
         "cloud mining",
         "ethereum",
@@ -101,7 +145,20 @@ def _is_btc_sha256_article(article: Dict) -> bool:
     ]
     if any(tok in blob for tok in exclude_tokens):
         return False
-    return True
+
+    # Primary: explicit Bitcoin mining / ASIC / hashrate / difficulty
+    if has_btc and has_mining:
+        return True
+
+    # Secondary: Bitcoin + energy/grid context (e.g., BTC price vs power costs)
+    if has_btc and has_energy:
+        return True
+
+    # Secondary: mining/ASIC/hashrate + energy/grid context, even if "bitcoin" isn't repeated
+    if has_mining and has_energy:
+        return True
+
+    return False
 
 
 def _parse_list_env(name: str) -> list[str]:
@@ -286,13 +343,16 @@ def _get_concept_uris(api_key: str, query: str) -> List[str]:
     """Get concept URIs for a search term using Event Registry's suggest API."""
     try:
         url = "https://eventregistry.org/api/v1/suggestConceptsFast"
-        r = _session().get(url, params={"apiKey": api_key, "prefix": query}, timeout=10)
-        if r.ok:
-            concepts = r.json()
-            # Return URIs of top 3 most relevant concepts
-            return [c.get("uri") for c in concepts[:3] if c.get("uri")]
-        else:
-            _log_er_error(r, "suggestConceptsFast")
+        data = _er_get(
+            url,
+            params={"apiKey": api_key, "prefix": query},
+            timeout=10,
+            context="suggestConceptsFast",
+        )
+        if not data:
+            return []
+        # Return URIs of top 3 most relevant concepts
+        return [c.get("uri") for c in data[:3] if c.get("uri")]
     except Exception as e:
         logger.debug("news_fetcher: concept URI fetch failed: %s", e)
     return []
@@ -309,17 +369,15 @@ def _get_trending_score(api_key: str, query: str) -> Dict:
             "lang": "eng",
             "dataType": ["news"],
         }
-        r = _session().get(url, params=params, timeout=10)
-        if r.ok:
-            data = r.json()
-            results = (data.get("timeAggr", {}) or {}).get("results", [])
-            if results:
-                # Calculate if recent volume is significantly higher than average
-                recent = results[-1].get("count", 0) if results else 0
-                avg = sum(x.get("count", 0) for x in results) / len(results) if results else 1
-                return {"recent": recent, "average": avg, "is_spike": recent > avg * 1.5}
-        else:
-            _log_er_error(r, "timeAggr")
+        data = _er_get(url, params=params, timeout=10, context="timeAggr")
+        if not data:
+            return {"recent": 0, "average": 0, "is_spike": False}
+        results = (data.get("timeAggr", {}) or {}).get("results", [])
+        if results:
+            # Calculate if recent volume is significantly higher than average
+            recent = results[-1].get("count", 0) if results else 0
+            avg = sum(x.get("count", 0) for x in results) / len(results) if results else 1
+            return {"recent": recent, "average": avg, "is_spike": recent > avg * 1.5}
     except Exception as e:
         logger.debug("news_fetcher: trending score fetch failed: %s", e)
     return {"recent": 0, "average": 0, "is_spike": False}
@@ -327,12 +385,12 @@ def _get_trending_score(api_key: str, query: str) -> Dict:
 
 def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> List[Dict]:
     """Fetch clustered events first, then get articles about those events."""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     try:
         url = "https://eventregistry.org/api/v1/event/getEvents"
         # Align event window with article recency (default last 24h)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         max_hours = int(os.getenv("ARTICLES_MAX_HOURS", "24") or "24")
         params = {
             "apiKey": api_key,
@@ -356,14 +414,12 @@ def _fetch_events_first(api_key: str, query: str, concept_uris: List[str]) -> Li
         else:
             params["keyword"] = query
 
-        r = _session().get(url, params=params, timeout=20)
-        if r.ok:
-            data = r.json()
-            events = (data.get("events", {}) or {}).get("results", [])
-            logger.info("news_fetcher: found %d clustered events", len(events))
-            return events
-        else:
-            _log_er_error(r, "getEvents")
+        data = _er_get(url, params=params, timeout=20, context="getEvents")
+        if not data:
+            return []
+        events = (data.get("events", {}) or {}).get("results", [])
+        logger.info("news_fetcher: found %d clustered events", len(events))
+        return events
     except Exception as e:
         logger.warning("news_fetcher: event fetch failed: %s", e)
     return []
@@ -522,13 +578,11 @@ def _fetch_minute_stream_articles(
             params["conceptOper"] = "or"
         else:
             params["keyword"] = query
-        r = _session().get(url, params=params, timeout=15)
-        if r.ok:
-            data = r.json() or {}
-            activity = (data.get("recentActivityArticles") or {}).get("activity") or []
-            return activity
-        else:
-            _log_er_error(r, "minuteStreamArticles")
+        data = _er_get(url, params=params, timeout=15, context="minuteStreamArticles")
+        if not data:
+            return []
+        activity = (data.get("recentActivityArticles") or {}).get("activity") or []
+        return activity
     except Exception as e:
         logger.warning("news_fetcher: minuteStreamArticles failed: %s", e)
     return []
@@ -548,7 +602,7 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
     except Exception:
         max_age_hours = 24
 
-    now = _dt.datetime.utcnow().replace(tzinfo=_dt.timezone.utc)
+    now = _dt.datetime.now(_dt.timezone.utc)
 
     uri = a.get("uri") or ""
     url = a.get("url") or ""
@@ -621,23 +675,11 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
     host = _domain(urlparse(url_str).netloc)
     blob = f"{art.get('title','')} {art.get('text','')} {art.get('source','')} {url_str}".lower()
 
-    # Strict ban on 'crypto' references per user policy
-    import re as _re
-
-    def _has_banned_crypto(s: str) -> bool:
-        pats = [
-            r"\bcrypto\b",
-            r"crypto-",
-            r"cryptocurrenc",  # cryptocurrency / cryptocurrencies
-        ]
-        return any(_re.search(p, s, flags=_re.I) for p in pats)
-
     sponsored_url = "/sponsored/" in url_str.lower() or "sponsored" in url_str.lower()
     if (
         host in BANNED_DOMAINS
         or _is_eth_domain(host)
         or any(k in blob for k in BANNED_KEYWORDS)
-        or _has_banned_crypto(blob)
         or sponsored_url
         or any(k in blob for k in SPONSORED_TOKENS)
     ):
@@ -647,6 +689,133 @@ def _build_article_from_er(a: Dict, api_key: str) -> Dict | None:
     # compute fingerprint once text is final
     art["fingerprint"] = _fingerprint(art)
     return art
+
+
+def _group_articles_by_event_or_fingerprint(articles: List[Dict]) -> Dict[str, List[Dict]]:
+    """Group articles by event URI when present, else by fingerprint/title signature.
+
+    This preserves the existing grouping logic used for deduplication.
+    """
+    grouped: Dict[str, List[Dict]] = {}
+    for art in articles:
+        fp = art.get("fingerprint", "") or ""
+        ev = art.get("event_uri") or ""
+        key = ev if ev else (fp if fp else _signature(art.get("title", "")))
+        grouped.setdefault(key, []).append(art)
+    return grouped
+
+
+def _pick_group_representatives(grouped: Dict[str, List[Dict]], limit: int) -> List[Dict]:
+    """Pick one representative article per group using _pick_best, up to limit."""
+    picked: List[Dict] = []
+    for _, group in grouped.items():
+        picked.append(_pick_best(group))
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+def _log_fetch_metrics(
+    picked: List[Dict],
+    articles: List[Dict],
+    query: str,
+    event_uris: List[str],
+    trending: Dict,
+) -> None:
+    """Log summary metrics about fetched and deduplicated articles."""
+    avg_social = (
+        sum(a.get("social_score", 0) for a in picked) / len(picked) if picked else 0
+    )
+    avg_sentiment = (
+        sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None)
+        / len(picked)
+        if picked
+        else 0
+    )
+
+    logger.info(
+        "news_fetcher: fetched raw=%s filtered=%s dedup=%s query=%s events=%d",
+        len(articles) + (0),  # raw_total is logged separately in fetch_bitcoin_mining_articles
+        len(articles),
+        len(picked),
+        query,
+        len(event_uris),
+    )
+    logger.info(
+        "news_fetcher: avg_social_score=%.1f avg_sentiment=%.2f spike=%s",
+        avg_social,
+        avg_sentiment,
+        trending.get("is_spike", False),
+    )
+
+    if picked:
+        dates = [a.get("date", "unknown") for a in picked]
+        logger.info("news_fetcher: picked article dates: %s", dates)
+
+
+def _build_articles_query_params(
+    api_key: str,
+    query: str,
+    concept_uris: List[str],
+    trending: Dict,
+) -> Dict:
+    """Build the base parameter payload for Event Registry article getArticles.
+
+    This keeps all request parameters in one place while preserving the
+    existing behavior and environment-driven tuning.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    # Date window for recency (defaults to last 24 hours)
+    max_hours = int(os.getenv("ARTICLES_MAX_HOURS", "24") or "24")
+    now = datetime.now(timezone.utc)
+    date_start = (now - timedelta(hours=max_hours)).strftime("%Y-%m-%d")
+    date_end = now.strftime("%Y-%m-%d")
+
+    # Source rank percentile (env-tunable)
+    start_rank = int(os.getenv("START_SOURCE_RANK_PERCENTILE", "0") or "0")
+    end_rank = int(os.getenv("END_SOURCE_RANK_PERCENTILE", "50") or "50")
+
+    # Event-only filter (env-tunable). Default keepAll for better recall within 24h.
+    events_only = _truthy(os.getenv("EVENTS_ONLY"))
+    event_filter_val = "skipArticlesWithoutEvent" if events_only else "keepAll"
+
+    params: Dict = {
+        "apiKey": api_key,
+        "resultType": "articles",
+        "articlesSortBy": "socialScore" if trending.get("is_spike") else "date",
+        "lang": "eng",
+        # Ask Event Registry to return full article body when possible
+        "articleBodyLen": -1,
+        # Skip duplicate articles at API level
+        "isDuplicateFilter": "skipDuplicates",
+        # Source quality filtering (top X% only)
+        "startSourceRankPercentile": start_rank,
+        "endSourceRankPercentile": end_rank,
+        # Only news articles (exclude blogs, press releases)
+        "dataType": ["news"],
+        # Event filter (keepAll by default)
+        "eventFilter": event_filter_val,
+        # Include social score for filtering
+        "includeArticleSocialScore": True,
+        # Include sentiment for filtering
+        "includeArticleSentiment": True,
+        # Include concepts for better context
+        "includeArticleConcepts": True,
+        # Include source ranking info
+        "includeSourceRanking": True,
+        # Date constraints to avoid stale items
+        "dateStart": date_start,
+        "dateEnd": date_end,
+    }
+
+    # Use concept URIs if available, otherwise fall back to keyword
+    if concept_uris:
+        params["conceptUri"] = concept_uris
+        params["conceptOper"] = "or"
+    else:
+        params["keyword"] = query
+    return params
 
 
 def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining") -> List[Dict]:
@@ -699,57 +868,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
     event_uris = [e.get("uri") for e in events if e.get("uri")]
 
     # Enhanced query payload with all optimizations
-    from datetime import datetime, timedelta
-
-    # Date window for recency (defaults to last 24 hours)
-    max_hours = int(os.getenv("ARTICLES_MAX_HOURS", "24") or "24")
-    # Event Registry dateStart/dateEnd are date-granular; we still enforce exact hours post-fetch
-    date_start = (datetime.utcnow() - timedelta(hours=max_hours)).strftime("%Y-%m-%d")
-    date_end = datetime.utcnow().strftime("%Y-%m-%d")
-
-    # Source rank percentile (env-tunable)
-    start_rank = int(os.getenv("START_SOURCE_RANK_PERCENTILE", "0") or "0")
-    end_rank = int(os.getenv("END_SOURCE_RANK_PERCENTILE", "50") or "50")
-
-    # Event-only filter (env-tunable). Default keepAll for better recall within 24h.
-    events_only = _truthy(os.getenv("EVENTS_ONLY"))
-    event_filter_val = "skipArticlesWithoutEvent" if events_only else "keepAll"
-
-    base_params = {
-        "apiKey": api_key,
-        "resultType": "articles",
-        "articlesSortBy": "socialScore" if trending.get("is_spike") else "date",
-        "lang": "eng",
-        # Ask Event Registry to return full article body when possible
-        "articleBodyLen": -1,
-        # Skip duplicate articles at API level
-        "isDuplicateFilter": "skipDuplicates",
-        # Source quality filtering (top X% only)
-        "startSourceRankPercentile": start_rank,
-        "endSourceRankPercentile": end_rank,
-        # Only news articles (exclude blogs, press releases)
-        "dataType": ["news"],
-        # Event filter (keepAll by default)
-        "eventFilter": event_filter_val,
-        # Include social score for filtering
-        "includeArticleSocialScore": True,
-        # Include sentiment for filtering
-        "includeArticleSentiment": True,
-        # Include concepts for better context
-        "includeArticleConcepts": True,
-        # Include source ranking info
-        "includeSourceRanking": True,
-        # Date constraints to avoid stale items
-        "dateStart": date_start,
-        "dateEnd": date_end,
-    }
-
-    # Use concept URIs if available, otherwise fall back to keyword
-    if concept_uris:
-        base_params["conceptUri"] = concept_uris
-        base_params["conceptOper"] = "or"
-    else:
-        base_params["keyword"] = query
+    base_params = _build_articles_query_params(api_key, query, concept_uris, trending)
     url = "https://eventregistry.org/api/v1/article/getArticles"
     try:
         articles: List[Dict] = []
@@ -764,11 +883,9 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
         # Paginated getArticles results next
         for page in range(1, 6):
             params = {**base_params, "articlesPage": page, "articlesCount": 50}
-            r = _session().get(url, params=params, timeout=20)
-            if not r.ok:
-                _log_er_error(r, "getArticles")
+            data = _er_get(url, params=params, timeout=20, context="getArticles")
+            if not data:
                 continue
-            data = r.json()
             raw_results = (data.get("articles", {}) or {}).get("results", [])
             search_batches.append((f"page-{page}", raw_results))
 
@@ -788,27 +905,10 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
                     articles.append(art)
             # Deduplicate by fingerprint first (most specific), with event_uri as secondary grouping
             # This allows multiple articles per event if they have different fingerprints
-            grouped: Dict[str, List[Dict]] = {}
-            for art in articles:
-                fp = art.get("fingerprint", "")
-                ev = art.get("event_uri") or ""
-                # Prefer event-level grouping; fall back to fingerprint, then normalized title signature
-                key = ev if ev else (fp if fp else _signature(art.get("title", "")))
-                grouped.setdefault(key, []).append(art)
-            picked = []
-            for key, group in grouped.items():
-                picked.append(_pick_best(group))
-                if len(picked) >= limit:
-                    break
-        # Log summary with new metrics
-        avg_social = sum(a.get("social_score", 0) for a in picked) / len(picked) if picked else 0
-        avg_sentiment = (
-            sum(a.get("sentiment", 0) for a in picked if a.get("sentiment") is not None)
-            / len(picked)
-            if picked
-            else 0
-        )
+            grouped = _group_articles_by_event_or_fingerprint(articles)
+            picked = _pick_group_representatives(grouped, limit)
 
+        # Log summary with new metrics (including spike info and dates)
         logger.info(
             "news_fetcher: fetched raw=%s filtered=%s dedup=%s query=%s events=%d",
             raw_total,
@@ -817,17 +917,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
             query,
             len(event_uris),
         )
-        logger.info(
-            "news_fetcher: avg_social_score=%.1f avg_sentiment=%.2f spike=%s",
-            avg_social,
-            avg_sentiment,
-            trending.get("is_spike", False),
-        )
-
-        # Log dates of picked articles for debugging freshness
-        if picked:
-            dates = [a.get("date", "unknown") for a in picked]
-            logger.info("news_fetcher: picked article dates: %s", dates)
+        _log_fetch_metrics(picked, articles, query, event_uris, trending)
 
         # Add metadata to picked articles
         for art in picked:

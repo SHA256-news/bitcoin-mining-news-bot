@@ -86,6 +86,10 @@ def run():
     )
 
     def _dedupe_prepared(items: list[dict]) -> list[dict]:
+        """Deduplicate prepared items by event_uri, fingerprint, article_uri, then URL.
+
+        This keeps the original grouping priority but makes the intent explicit.
+        """
         seen: set[str] = set()
         out: list[dict] = []
         for it in items:
@@ -100,6 +104,90 @@ def run():
             seen.add(k)
             out.append(it)
         return out
+
+    def _queue_candidates(
+        items: list[dict],
+        window_hours: int,
+        event_window_hours: int,
+    ) -> list[dict]:
+        """Return deduped items that are not already posted in the given windows."""
+        return [
+            it
+            for it in _dedupe_prepared(items)
+            if not already_posted(
+                url=it.get("url", ""),
+                event_uri=it.get("event_uri", ""),
+                fingerprint=it.get("fingerprint", ""),
+                article_uri=it.get("article_uri", ""),
+                window_hours=window_hours,
+                event_window_hours=event_window_hours,
+            )
+        ]
+
+    def _select_post_candidates(
+        prepared: list[dict],
+        window_hours: int,
+        event_window_hours: int,
+    ) -> list[dict]:
+        """Filter prepared items for a non-duplicate candidate to post now.
+
+        This mirrors the existing already_posted checks but gives the
+        selection step a name.
+        """
+        return [
+            item
+            for item in prepared
+            if not already_posted(
+                url=item.get("url", ""),
+                event_uri=item.get("event_uri", ""),
+                fingerprint=item.get("fingerprint", ""),
+                article_uri=item.get("article_uri", ""),
+                window_hours=window_hours,
+                event_window_hours=event_window_hours,
+            )
+        ]
+
+    def _fallback_from_queue(
+        window_hours: int,
+        post_event_skip_hours: int,
+    ) -> None:
+        """Try posting one item from the queue when nothing new was posted.
+
+        Follows the existing behavior: skip duplicates, publish once,
+        mark as posted on success, and requeue on failure.
+        """
+        from src.queue import pop_one, push_many as _requeue
+
+        q = pop_one()
+        while q and already_posted(
+            url=q.get("url", ""),
+            event_uri=q.get("event_uri", ""),
+            fingerprint=q.get("fingerprint", ""),
+            article_uri=q.get("article_uri", ""),
+            window_hours=window_hours,
+            event_window_hours=post_event_skip_hours,
+        ):
+            q = pop_one()
+        if not q:
+            return
+        t1 = compose_tweet_1(q["headline"], q["bullets"])
+        t2 = compose_tweet_2(q["url"])
+        tid1, tid2 = publish(t1, t2)
+        if tid1:
+            mark_posted(
+                url=q.get("url", ""),
+                event_uri=q.get("event_uri", ""),
+                article_uri=q.get("article_uri", ""),
+                fingerprint=q.get("fingerprint", ""),
+            )
+        else:
+            logger.warning(
+                "main: publish failed (queue) event=%s fp=%s url=%s",
+                q.get("event_uri", ""),
+                q.get("fingerprint", ""),
+                q.get("url", ""),
+            )
+            _requeue([q])
 
     for art in articles:
         url = art.get("url", "")
@@ -176,18 +264,7 @@ def run():
             from src.queue import push_many
 
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = [
-                it
-                for it in _dedupe_prepared(prepared)
-                if not already_posted(
-                    url=it.get("url", ""),
-                    event_uri=it.get("event_uri", ""),
-                    fingerprint=it.get("fingerprint", ""),
-                    article_uri=it.get("article_uri", ""),
-                    window_hours=window_hours,
-                    event_window_hours=post_event_skip_hours,
-                )
-            ]
+            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
                 push_many(to_stage)
         return
@@ -200,18 +277,7 @@ def run():
 
             # Skip anything already posted within the posting decision window
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = [
-                it
-                for it in _dedupe_prepared(prepared)
-                if not already_posted(
-                    url=it.get("url", ""),
-                    event_uri=it.get("event_uri", ""),
-                    fingerprint=it.get("fingerprint", ""),
-                    article_uri=it.get("article_uri", ""),
-                    window_hours=window_hours,
-                    event_window_hours=post_event_skip_hours,
-                )
-            ]
+            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
                 push_many(to_stage)
         for item in prepared:
@@ -221,23 +287,13 @@ def run():
         return
 
     # Real run: choose the newest non-duplicate candidate first; queue the rest
-    from src.queue import push_many, pop_one
+    from src.queue import push_many
 
     # Strict skip window for posting decision (independent of EVENT_DEDUP_HOURS)
     post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
 
     # Filter prepared items for a non-duplicate candidate to post now
-    post_candidates = []
-    for item in prepared:
-        if not already_posted(
-            url=item.get("url", ""),
-            event_uri=item.get("event_uri", ""),
-            fingerprint=item.get("fingerprint", ""),
-            article_uri=item.get("article_uri", ""),
-            window_hours=window_hours,
-            event_window_hours=post_event_skip_hours,
-        ):
-            post_candidates.append(item)
+    post_candidates = _select_post_candidates(prepared, window_hours, post_event_skip_hours)
 
     posted = False
     if post_candidates:
@@ -249,18 +305,7 @@ def run():
         rest = [x for x in prepared if x is not item]
         if rest:
             # Skip anything already posted within the posting decision window
-            rest2 = [
-                it
-                for it in _dedupe_prepared(rest)
-                if not already_posted(
-                    url=it.get("url", ""),
-                    event_uri=it.get("event_uri", ""),
-                    fingerprint=it.get("fingerprint", ""),
-                    article_uri=it.get("article_uri", ""),
-                    window_hours=window_hours,
-                    event_window_hours=post_event_skip_hours,
-                )
-            ]
+            rest2 = _queue_candidates(rest, window_hours, post_event_skip_hours)
             if rest2:
                 push_many(rest2)
         if tid1:
@@ -286,55 +331,13 @@ def run():
         if prepared:
             # Skip anything already posted within the posting decision window
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = [
-                it
-                for it in _dedupe_prepared(prepared)
-                if not already_posted(
-                    url=it.get("url", ""),
-                    event_uri=it.get("event_uri", ""),
-                    fingerprint=it.get("fingerprint", ""),
-                    article_uri=it.get("article_uri", ""),
-                    window_hours=window_hours,
-                    event_window_hours=post_event_skip_hours,
-                )
-            ]
+            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
                 push_many(to_stage)
 
     if not posted:
         # Try queue fallback, skipping duplicates within the posting decision window
-        q = pop_one()
-        while q and already_posted(
-            url=q.get("url", ""),
-            event_uri=q.get("event_uri", ""),
-            fingerprint=q.get("fingerprint", ""),
-            article_uri=q.get("article_uri", ""),
-            window_hours=window_hours,
-            event_window_hours=post_event_skip_hours,
-        ):
-            q = pop_one()
-        if q:
-            t1 = compose_tweet_1(q["headline"], q["bullets"])
-            t2 = compose_tweet_2(q["url"])
-            tid1, tid2 = publish(t1, t2)
-            if tid1:
-                mark_posted(
-                    url=q.get("url", ""),
-                    event_uri=q.get("event_uri", ""),
-                    article_uri=q.get("article_uri", ""),
-                    fingerprint=q.get("fingerprint", ""),
-                )
-            else:
-                logger.warning(
-                    "main: publish failed (queue) event=%s fp=%s url=%s",
-                    q.get("event_uri", ""),
-                    q.get("fingerprint", ""),
-                    q.get("url", ""),
-                )
-                # Requeue the item to avoid losing it on transient failures (e.g., rate limits)
-                from src.queue import push_many as _requeue
-
-                _requeue([q])
+        _fallback_from_queue(window_hours, post_event_skip_hours)
 
 
 if __name__ == "__main__":

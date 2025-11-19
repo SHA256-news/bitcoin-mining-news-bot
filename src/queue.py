@@ -57,12 +57,18 @@ def dedupe() -> None:
     _save(_dedupe(q))
 
 
+def _filter_queue(pred) -> int:
+    """Load, filter queue by predicate, save, and return count removed."""
+    q = _load()
+    before = len(q)
+    q = [it for it in q if not pred(it)]
+    _save(q)
+    return before - len(q)
+
+
 def purge_banned_crypto() -> int:
     """Remove items whose headline/url contain banned 'crypto' tokens."""
     import re
-
-    q = _load()
-    before = len(q)
 
     def bad(it: dict) -> bool:
         h = (it.get("headline") or "").lower()
@@ -70,60 +76,53 @@ def purge_banned_crypto() -> int:
         pats = [r"\bcrypto\b", r"crypto-", r"cryptocurrenc"]
         return any(re.search(p, h) or re.search(p, u) for p in pats)
 
-    q = [it for it in q if not bad(it)]
-    _save(q)
-    return before - len(q)
+    return _filter_queue(bad)
 
 
 def purge_posted(event_hours: int = 168, window_hours: int = 168) -> int:
     """Remove queue items that have already been posted recently (by event/url/fp/article)."""
     from src.state import already_posted
 
-    q = _load()
-    before = len(q)
-    kept = []
-    for it in q:
-        if already_posted(
+    def is_posted(it: dict) -> bool:
+        return already_posted(
             url=it.get("url", ""),
             event_uri=it.get("event_uri", ""),
             fingerprint=it.get("fingerprint", ""),
             article_uri=it.get("article_uri", ""),
             window_hours=window_hours,
             event_window_hours=event_hours,
-        ):
-            continue
-        kept.append(it)
-    _save(kept)
-    return before - len(kept)
+        )
+
+    return _filter_queue(is_posted)
 
 
 def remove_by_url(url: str) -> int:
     """Remove all queue items matching the exact URL."""
-    q = _load()
-    before = len(q)
     url_l = (url or "").strip()
-    q = [it for it in q if (it.get("url", "").strip() != url_l)]
-    _save(q)
-    return before - len(q)
+
+    def bad(it: dict) -> bool:
+        return (it.get("url", "").strip() == url_l)
+
+    return _filter_queue(bad)
 
 
 def remove_by_urls(urls: list[str]) -> int:
-    q = _load()
-    before = len(q)
     set_urls = {u.strip() for u in (urls or []) if u and u.strip()}
-    q = [it for it in q if it.get("url", "").strip() not in set_urls]
-    _save(q)
-    return before - len(q)
+
+    def bad(it: dict) -> bool:
+        return it.get("url", "").strip() in set_urls
+
+    return _filter_queue(bad)
 
 
 def remove_by_title_substr(substr: str) -> int:
     """Remove all queue items whose headline contains the substring (case-insensitive)."""
-    q = _load()
-    before = len(q)
     s = (substr or "").lower()
-    q = [it for it in q if s not in (it.get("headline", "").lower())]
-    _save(q)
-    return before - len(q)
+
+    def bad(it: dict) -> bool:
+        return s in (it.get("headline", "").lower())
+
+    return _filter_queue(bad)
 
 
 def purge_company_duplicates_keep_best_domain() -> int:

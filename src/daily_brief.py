@@ -38,7 +38,7 @@ def generate_daily_brief(hours: int = 24) -> str:
     articles.sort(key=lambda a: a.get("ts", 0), reverse=True)
 
     # Generate date string for post
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     date_str = now.strftime("%Y-%m-%d")
     display_date = now.strftime("%B %d, %Y")
 
@@ -138,7 +138,7 @@ def _generate_post_html(articles: List[Dict], display_date: str) -> str:
       </main>
       
       <footer class="border-t border-zinc-800 py-6 text-sm text-zinc-400 text-center">
-        <div>© {datetime.datetime.utcnow().year} SHA256 Media — Bitcoin Mining Only</div>
+        <div>© {datetime.datetime.now(datetime.timezone.utc).year} SHA256 Media — Bitcoin Mining Only</div>
       </footer>
     </div>
   </body>

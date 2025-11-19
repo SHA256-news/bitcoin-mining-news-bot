@@ -53,7 +53,7 @@ def generate_editorial_brief(hours: int = 24, api_key: str = None) -> str:
     )
 
     # Generate date string for post
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     date_str = now.strftime("%Y-%m-%d")
     display_date = now.strftime("%B %d, %Y")
 

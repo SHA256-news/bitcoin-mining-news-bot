@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _today_strings() -> tuple[str, str]:
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     return now.strftime("%Y-%m-%d"), now.strftime("%B %d, %Y")
 
 
