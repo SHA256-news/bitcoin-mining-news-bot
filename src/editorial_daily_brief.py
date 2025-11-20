@@ -25,10 +25,12 @@ def generate_editorial_brief(hours: int = 24, api_key: str | None = None) -> str
     """
     # Get API key
     if not api_key:
-        api_key = os.getenv("GEMINI_EDITORIAL_KEY")
+        api_key = os.getenv("GEMINI_EDITORIAL_KEY") or os.getenv("GOOGLE_API_KEY")
 
     if not api_key:
-        logger.error("editorial_brief: No API key provided (set GEMINI_EDITORIAL_KEY)")
+        logger.error(
+            "editorial_brief: No API key provided (set GEMINI_EDITORIAL_KEY or GOOGLE_API_KEY)"
+        )
         return ""
 
     # Get articles from state
