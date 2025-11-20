@@ -33,13 +33,14 @@ pytest -q
 pytest tests/test_formatter.py -k compose  # run a single test pattern
 ```
 
-## Lint/Format
+## Lint/Format/Type Check
 ```bash
 ruff check .
-black --check .  # or: black . to auto-format
+black --check .
+mypy .
 ```
 
-Optional pre-commit hooks:
+**Mandatory** pre-commit hooks (runs all the above):
 ```bash
 pre-commit install
 pre-commit run --all-files
@@ -65,13 +66,13 @@ The bot generates a daily brief of all fetched articles (regardless of whether t
 
 **Manual generation:**
 ```bash
-python -m src.daily_brief         # last 24 hours
-python -m src.daily_brief 48      # last 48 hours
+python -m src.editorial_daily_brief         # last 24 hours
+python -m src.editorial_daily_brief 48      # last 48 hours
 ```
 
 The daily brief:
 - Collects all articles fetched in the last 24 hours
-- Generates an HTML blog post in `docs/posts/YYYY-MM-DD-daily-brief.html`
+- Generates an editorial HTML blog post in `docs/posts/YYYY-MM-DD-editorial-brief.html`
 - Updates `docs/posts/index.json` with post metadata
 - The homepage automatically displays the latest briefs
 
