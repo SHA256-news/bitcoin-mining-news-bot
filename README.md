@@ -16,6 +16,7 @@ Copy `.env.example` to `.env` (for local development) and fill values:
 - `GOOGLE_API_KEY`
 - `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`
 - Optional: `ARTICLES_LIMIT`, `TOPIC_QUERY`, `GEMINI_MODEL`
+- Emergency Override: `MANUAL_POSTED_URLS` (comma-separated list of URLs to treat as posted, useful if X sync fails).
 - Local/dev toggles: `DRY_RUN=1` to print instead of post; `STATE_FILE` (default `.state/state.json`), `POSTED_FILE` (default `.state/posted.json`).
 
 ## Run locally

@@ -64,25 +64,40 @@ def _posted_default() -> Dict:
 
 def _posted_load() -> Dict:
     p = _posted_path()
+    items: List[Dict] = []
     if p.exists():
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            items = data.get("items") or []
         except Exception:
-            return _posted_default()
-    # First-time migration from legacy state.json if present
-    st = _load()
-    items: List[Dict] = []
-    now = _now_ts()
+            pass
 
-    def _migrate_seq(seq_key: str, field_in: str, field_out: str) -> None:
-        for obj in st.get(seq_key) or []:
-            if isinstance(obj, dict) and obj.get(field_in):
-                items.append({field_out: str(obj.get(field_in)), "ts": int(obj.get("ts", now))})
+    # If file missing or empty, try legacy migration
+    if not items:
+        st = _load()
+        now = _now_ts()
 
-    _migrate_seq("posted_urls", "url", "url")
-    _migrate_seq("posted_events", "event", "event_uri")
-    _migrate_seq("posted_article_uris", "article_uri", "article_uri")
-    _migrate_seq("posted_fingerprints", "fp", "fingerprint")
+        def _migrate_seq(seq_key: str, field_in: str, field_out: str) -> None:
+            for obj in st.get(seq_key) or []:
+                if isinstance(obj, dict) and obj.get(field_in):
+                    items.append({field_out: str(obj.get(field_in)), "ts": int(obj.get("ts", now))})
+
+        _migrate_seq("posted_urls", "url", "url")
+        _migrate_seq("posted_events", "event", "event_uri")
+        _migrate_seq("posted_article_uris", "article_uri", "article_uri")
+        _migrate_seq("posted_fingerprints", "fp", "fingerprint")
+
+    # Inject MANUAL_POSTED_URLS from env (comma-separated)
+    # This allows users to block specific URLs if X sync is failing
+    manual_env = os.getenv("MANUAL_POSTED_URLS", "")
+    if manual_env:
+        manual_urls = [u.strip() for u in manual_env.split(",") if u.strip()]
+        now = _now_ts()
+        # Add if not already present
+        existing_urls = {it.get("url") for it in items if it.get("url")}
+        for murl in manual_urls:
+            if murl not in existing_urls:
+                items.append({"url": murl, "ts": now, "source": "manual_env"})
 
     return {"items": items}
 
