@@ -2,7 +2,9 @@ import json
 import os
 import pathlib
 import time
+import tempfile
 from typing import Dict, List, Any
+from urllib.parse import urlparse, urlunparse
 
 DEFAULT_STATE_FILE = os.getenv("STATE_FILE", ".state/state.json")
 POSTED_FILE = os.getenv("POSTED_FILE", ".state/posted.json")
@@ -85,15 +87,32 @@ def _posted_load() -> Dict:
     return {"items": items}
 
 
+def _atomic_write(path: pathlib.Path, content: str) -> None:
+    """Write content to a temporary file and rename it to the target path for atomicity."""
+    _ensure_parent(path)
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, text=True)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        # Atomic rename
+        os.replace(tmp_path, path)
+    except Exception:
+        # Clean up temp file on failure
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
 def _posted_save(obj: Dict) -> None:
     p = _posted_path()
-    p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    content = json.dumps(obj, ensure_ascii=False, indent=2)
+    _atomic_write(p, content)
 
 
 def _save(state: Dict) -> None:
     p = _state_path()
-    _ensure_parent(p)
-    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    content = json.dumps(state, ensure_ascii=False, indent=2)
+    _atomic_write(p, content)
 
 
 def _now_ts() -> int:
@@ -119,6 +138,19 @@ def _posted_prune(window_hours: int = 168) -> None:
     items: List[Dict] = obj.get("items") or []
     obj["items"] = [x for x in items if isinstance(x, dict) and int(x.get("ts", 0)) >= cutoff]
     _posted_save(obj)
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize URL by stripping query parameters and fragments."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        # Reconstruct without params, query, or fragment
+        # scheme, netloc, path, params, query, fragment
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+    except Exception:
+        return url
 
 
 def already_posted(
@@ -173,11 +205,28 @@ def already_posted(
                 _log.debug("already_posted: match=fingerprint fp=%s", fingerprint)
                 return True
 
-    # URL
+    # URL (Normalized)
     if url:
+        norm_url = _normalize_url(url)
         for it in items:
-            if it.get("url") == url and (now - int(it.get("ts", 0))) <= window_hours * 3600:
-                _log.debug("already_posted: match=url url=%s", url)
+            # Check against both raw and normalized stored URLs if possible,
+            # but for now we just normalize the candidate and check if it matches
+            # a normalized version of the stored URL.
+            stored_url = it.get("url", "")
+            if not stored_url:
+                continue
+
+            # Direct match
+            if stored_url == url and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+                _log.debug("already_posted: match=url (exact) url=%s", url)
+                return True
+
+            # Normalized match
+            if (
+                _normalize_url(stored_url) == norm_url
+                and (now - int(it.get("ts", 0))) <= window_hours * 3600
+            ):
+                _log.debug("already_posted: match=url (normalized) url=%s", url)
                 return True
 
     return False
@@ -203,26 +252,34 @@ def mark_posted(
     max_entries: int = 2000,
 ) -> None:
     """Record this item as posted (rebuilt, minimal and robust)."""
-    now = _now_ts()
-    obj = _posted_load()
-    items: List[Dict] = obj.get("items") or []
-    entry: Dict[str, Any] = {"ts": now}
-    if url:
-        entry["url"] = url
-    if event_uri:
-        entry["event_uri"] = event_uri
-    if article_uri:
-        entry["article_uri"] = article_uri
-    if fingerprint:
-        entry["fingerprint"] = fingerprint
+    import logging as _logging
 
-    # Deduplicate by any present key
-    items = [it for it in items if not _posted_identity_equal(it, entry)]
-    items.append(entry)
-    if len(items) > max_entries:
-        items = items[-max_entries:]
-    obj["items"] = items
-    _posted_save(obj)
+    _log = _logging.getLogger(__name__)
+
+    try:
+        now = _now_ts()
+        obj = _posted_load()
+        items: List[Dict] = obj.get("items") or []
+        entry: Dict[str, Any] = {"ts": now}
+        if url:
+            entry["url"] = url
+        if event_uri:
+            entry["event_uri"] = event_uri
+        if article_uri:
+            entry["article_uri"] = article_uri
+        if fingerprint:
+            entry["fingerprint"] = fingerprint
+
+        # Deduplicate by any present key
+        items = [it for it in items if not _posted_identity_equal(it, entry)]
+        items.append(entry)
+        if len(items) > max_entries:
+            items = items[-max_entries:]
+        obj["items"] = items
+        _posted_save(obj)
+        _log.info("mark_posted: success url=%s", url)
+    except Exception as e:
+        _log.error("mark_posted: failed to save state: %s", e)
 
 
 # Summary cache (72h window)
