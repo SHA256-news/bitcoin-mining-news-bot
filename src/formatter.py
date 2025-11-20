@@ -33,12 +33,12 @@ def sanitize_summary(
         ratio = (overlap / max(1, len(ht))) if ht else 0.0
         if ht and ratio > 0.6:
             # Try a conservative rewrite: keep readability; avoid aggressive token stripping
-            cleaned = [
+            cleaned_tokens = [
                 t
                 for t in head.split()
                 if t.lower() not in st and t.lower() not in {"the", "a", "an"}
             ]
-            candidate = " ".join(cleaned).strip()
+            candidate = " ".join(cleaned_tokens).strip()
             # If aggressive removal degrades readability, keep original without adding generic prefixes
             words = candidate.split()
             head = candidate if (len(candidate) >= 24 and len(words) >= 4) else head

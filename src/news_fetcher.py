@@ -48,7 +48,9 @@ def _session() -> requests.Session:
 
 
 def _truthy(val: str | None) -> bool:
-    return bool(val) and val.strip().lower() in {"1", "true", "yes", "on"}
+    if not val:
+        return False
+    return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _log_er_error(resp: requests.Response, context: str = "") -> None:
@@ -882,7 +884,7 @@ def fetch_bitcoin_mining_articles(limit: int = 5, query: str = "bitcoin mining")
 
     # Try event-based fetching first for better clustering
     events = _fetch_events_first(api_key, query, concept_uris)
-    event_uris = [e.get("uri") for e in events if e.get("uri")]
+    event_uris = [str(e.get("uri")) for e in events if e.get("uri")]
 
     # Enhanced query payload with all optimizations
     base_params = _build_articles_query_params(api_key, query, concept_uris, trending)

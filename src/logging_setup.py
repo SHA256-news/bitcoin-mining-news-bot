@@ -22,7 +22,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(default_level: str | None = None) -> None:
-    level_name = (default_level or os.getenv("LOG_LEVEL", "INFO")).upper()
+    level_name = (default_level or os.getenv("LOG_LEVEL", "INFO") or "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     root = logging.getLogger()
     # Drop existing handlers (clean slate)

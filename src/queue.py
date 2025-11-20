@@ -180,7 +180,7 @@ def purge_company_duplicates_keep_best_domain() -> int:
         best_score = None
         for it in items:
             score = _domain_score(it.get("url", "") or "")
-            if best is None or score < best_score:
+            if best is None or (best_score is not None and score < best_score):
                 best = it
                 best_score = score
         for it in items:

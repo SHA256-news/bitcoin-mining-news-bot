@@ -13,7 +13,7 @@ from src.state import get_fetched_articles_since
 logger = logging.getLogger(__name__)
 
 
-def generate_editorial_brief(hours: int = 24, api_key: str = None) -> str:
+def generate_editorial_brief(hours: int = 24, api_key: str | None = None) -> str:
     """Generate editorial daily brief with Google Search grounding.
 
     Args:
@@ -247,7 +247,7 @@ def _generate_post_html(
 
     # 4) Best-effort linkify using article hints
     if articles:
-        link_map = {}
+        link_map: dict[str, str] = {}
         for a in articles:
             url = a.get("url")
             if not url:

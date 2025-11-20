@@ -17,7 +17,9 @@ def _init_logging():
 
 
 def _truthy(val: str | None) -> bool:
-    return bool(val) and val.strip().lower() in {"1", "true", "yes", "on"}
+    if not val:
+        return False
+    return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def run():
@@ -80,10 +82,11 @@ def run():
     prepared = []
     # Configurable de-dup windows
     window_hours = int(os.getenv("DEDUP_WINDOW_HOURS", "72") or "72")
-    event_window_hours = os.getenv("EVENT_DEDUP_HOURS")
-    event_window_hours = (
-        int(event_window_hours) if (event_window_hours or "").strip().isdigit() else window_hours
-    )
+    event_window_hours_str = os.getenv("EVENT_DEDUP_HOURS")
+    if event_window_hours_str and event_window_hours_str.strip().isdigit():
+        event_window_hours = int(event_window_hours_str)
+    else:
+        event_window_hours = window_hours
 
     def _dedupe_prepared(items: list[dict]) -> list[dict]:
         """Deduplicate prepared items by event_uri, fingerprint, article_uri, then URL.

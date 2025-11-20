@@ -2,7 +2,7 @@ import json
 import os
 import pathlib
 import time
-from typing import Dict, List
+from typing import Dict, List, Any
 
 DEFAULT_STATE_FILE = os.getenv("STATE_FILE", ".state/state.json")
 POSTED_FILE = os.getenv("POSTED_FILE", ".state/posted.json")
@@ -206,7 +206,7 @@ def mark_posted(
     now = _now_ts()
     obj = _posted_load()
     items: List[Dict] = obj.get("items") or []
-    entry = {"ts": now}
+    entry: Dict[str, Any] = {"ts": now}
     if url:
         entry["url"] = url
     if event_uri:
@@ -275,7 +275,7 @@ def gemini_counts() -> Dict:
 def gemini_increment(model: str) -> None:
     state = _load()
     _ensure_usage_day(state)
-    usage = state.get("gemini_usage")
+    usage = state.get("gemini_usage") or {}
     counts = usage.get("counts") or {}
     counts[model] = int(counts.get(model, 0)) + 1
     usage["counts"] = counts
