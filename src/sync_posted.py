@@ -3,7 +3,7 @@ import re
 from typing import List, Dict, Optional
 
 from src.state import mark_posted
-from src.queue import _load as _queue_load, purge_posted
+from src.article_queue import purge_posted, _load as _queue_load
 
 
 def _extract_keywords(text: str) -> List[str]:

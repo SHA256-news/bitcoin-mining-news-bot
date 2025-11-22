@@ -29,7 +29,7 @@ def run():
 
     # One-time queue cleanup: dedupe, purge banned tokens, purge posted, collapse company duplicates (keep most authoritative domain)
     try:
-        from src.queue import (
+        from src.article_queue import (
             dedupe as _dedupe_queue,
             purge_banned_crypto as _purge_crypto,
             purge_posted as _purge_posted,
@@ -66,7 +66,6 @@ def run():
     limit_str = os.getenv("ARTICLES_LIMIT", "5").strip()
     limit = int(limit_str) if limit_str else 5
     query = os.getenv("TOPIC_QUERY", "bitcoin mining")
-    dry_run = _truthy(os.getenv("DRY_RUN"))
     skip_summarizer = _truthy(os.getenv("SKIP_SUMMARIZER"))
 
     # Respect daily Gemini budget: cap items to remaining across models
@@ -77,22 +76,12 @@ def run():
     budget_cap = max(1, min(limit, remaining_pro + remaining_flash))
 
     articles = (fetch_bitcoin_mining_articles(limit=limit, query=query) or [])[:budget_cap]
-    prepared = []
+
     # Configurable de-dup windows
     window_hours = int(os.getenv("DEDUP_WINDOW_HOURS", "72") or "72")
     # EVENT_DEDUP_HOURS controls how long we treat an Event Registry event URI as
     # "recent". Values <= 0 or invalid values fall back to the main window so we
     # never accidentally disable event-based deduplication.
-    event_window_hours = window_hours
-    raw_event_win = (os.getenv("EVENT_DEDUP_HOURS", "") or "").strip()
-    if raw_event_win:
-        try:
-            ev_val = int(raw_event_win)
-            if ev_val > 0:
-                event_window_hours = ev_val
-        except Exception:
-            # Ignore bad values and keep default
-            pass
 
     def _dedupe_prepared(items: list[dict]) -> list[dict]:
         """Deduplicate prepared items using story/article/event URIs, then fingerprint, then URL.
@@ -120,7 +109,6 @@ def run():
     def _queue_candidates(
         items: list[dict],
         window_hours: int,
-        event_window_hours: int,
     ) -> list[dict]:
         """Return deduped items that are not already posted in the given windows."""
         return [
@@ -133,31 +121,7 @@ def run():
                 article_uri=it.get("article_uri", ""),
                 story_uri=it.get("story_uri", ""),
                 window_hours=window_hours,
-                event_window_hours=event_window_hours,
-            )
-        ]
-
-    def _select_post_candidates(
-        prepared: list[dict],
-        window_hours: int,
-        event_window_hours: int,
-    ) -> list[dict]:
-        """Filter prepared items for a non-duplicate candidate to post now.
-
-        This mirrors the existing already_posted checks but gives the
-        selection step a name.
-        """
-        return [
-            item
-            for item in prepared
-            if not already_posted(
-                url=item.get("url", ""),
-                event_uri=item.get("event_uri", ""),
-                fingerprint=item.get("fingerprint", ""),
-                article_uri=item.get("article_uri", ""),
-                story_uri=item.get("story_uri", ""),
-                window_hours=window_hours,
-                event_window_hours=event_window_hours,
+                event_window_hours=window_hours,
             )
         ]
 
@@ -170,7 +134,7 @@ def run():
         Follows the existing behavior: skip duplicates, publish once,
         mark as posted on success, and requeue on failure.
         """
-        from src.queue import pop_one
+        from src.article_queue import pop_one
 
         # Try up to 3 times to find a postable item
         failed_items = []
@@ -190,7 +154,45 @@ def run():
             if not q:
                 break
 
-            t1 = compose_tweet_1(q["headline"], q["bullets"])
+            # JIT Summarization for queue items
+            headline = q.get("headline", "")
+            bullets = q.get("bullets", [])
+
+            # If no bullets, we need to summarize (unless it's a dry run skip or we have a cache hit inside summarize)
+            if not bullets:
+                # We need to reconstruct a minimal article dict for the summarizer
+                # The queue item might not have the full text, but hopefully it has enough or we can fetch?
+                # Actually, the queue item IS the article dict usually.
+                h, b = summarize_for_miners(q)
+                if not h or not b:
+                    logger.info("main: queue item not relevant after summary: %s", q.get("url"))
+                    continue
+
+                # Sanitize
+                h2, b2 = sanitize_summary(h, b, q.get("title", ""))
+                if not b2:
+                    logger.info("main: queue item empty bullets after sanitize: %s", q.get("url"))
+                    continue
+
+                headline = h2
+                bullets = b2
+
+                # Update the item with the new summary so we don't re-summarize if we fail to post and re-queue
+                q["headline"] = headline
+                q["bullets"] = bullets
+
+                # Also save to fetched articles for daily brief visibility
+                save_fetched_article(
+                    fingerprint=q.get("fingerprint", ""),
+                    headline=headline,
+                    bullets=bullets,
+                    url=q.get("url", ""),
+                    event_uri=q.get("event_uri", ""),
+                    source_title=q.get("title", ""),
+                    source_date=q.get("date", ""),
+                )
+
+            t1 = compose_tweet_1(headline, bullets)
             t2 = compose_tweet_2(q["url"])
             tid1, tid2 = publish(t1, t2)
             if tid1:
@@ -214,164 +216,154 @@ def run():
                 failed_items.append(q)
 
         if failed_items:
-            from src.queue import bury_many
+            from src.article_queue import bury_many
 
             bury_many(failed_items)
 
-    for art in articles:
-        url = art.get("url", "")
-        event_uri = art.get("event_uri", "")
-        article_uri = art.get("article_uri", "")
-        story_uri = art.get("story_uri", "")
-        fp = art.get("fingerprint", "")
-        source_title = art.get("title", "")
-        # Bypass dedup if DRY_RUN, otherwise enforce configured windows
-        if not dry_run and already_posted(
-            url=url,
-            event_uri=event_uri,
-            fingerprint=fp,
-            article_uri=article_uri,
-            story_uri=story_uri,
-            window_hours=window_hours,
-            event_window_hours=event_window_hours,
-        ):
-            logger.info(
-                "main: skipping already-posted article event=%s url=%s",
-                event_uri,
-                url,
-            )
-            continue
-        if skip_summarizer:
-            # Stage raw title without calling Gemini; don't save fetched article
-            head = (source_title or "Bitcoin mining update").strip()[
-                :120
-            ] or "Bitcoin mining update"
-            prepared.append(
-                {
-                    "headline": head,
-                    "bullets": [],
-                    "url": url,
-                    "event_uri": event_uri,
-                    "article_uri": article_uri,
-                    "fingerprint": fp,
-                }
-            )
-            continue
-        headline, bullets = summarize_for_miners(art)
-        if not headline or not bullets:
-            logger.info("main: skipping not-relevant article event=%s url=%s", event_uri, url)
-            continue
-        # Deterministic de-dup across headline/bullets
-        headline2, bullets2 = sanitize_summary(headline, bullets, source_title)
-        if not bullets2:
-            logger.info(
-                "main: skipping after sanitize (empty bullets) event=%s url=%s", event_uri, url
-            )
-            continue
-        # Save to fetched_articles for daily brief (regardless of whether posted to Twitter)
-        save_fetched_article(
-            fingerprint=fp,
-            headline=headline2,
-            bullets=bullets2,
-            url=url,
-            event_uri=event_uri,
-            source_title=source_title,
-            source_date=art.get("date", ""),
-        )
-        prepared.append(
-            {
-                "headline": headline2,
-                "bullets": bullets2,
-                "url": url,
-                "event_uri": event_uri,
-                "article_uri": article_uri,
-                "story_uri": story_uri,
-                "fingerprint": fp,
-            }
-        )
+    # -------------------------------------------------------------------------
+    # JIT Summarization Logic
+    # -------------------------------------------------------------------------
 
-    # If skip_summarizer: stage and exit early to avoid any Gemini usage
-    if skip_summarizer:
-        if prepared:
-            from src.queue import push_many
-
-            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
-            if to_stage:
-                push_many(list(reversed(to_stage)))
-        return
-
-    # DRY_RUN: preview all threads
-    if dry_run:
-        # Stage prepared items into the queue so a subsequent real run can post the newest first
-        if prepared:
-            from src.queue import push_many
-
-            # Skip anything already posted within the posting decision window
-            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
-            if to_stage:
-                push_many(list(reversed(to_stage)))
-        for item in prepared:
-            t1 = compose_tweet_1(item["headline"], item["bullets"])
-            t2 = compose_tweet_2(item["url"])
-            publish(t1, t2)
-        return
-
-    # Real run: choose the newest non-duplicate candidate first; queue the rest
-    from src.queue import push_many
-
-    # Strict skip window for posting decision (independent of EVENT_DEDUP_HOURS)
+    # 1. Filter candidates that are NOT already posted
+    # Strict skip window for posting decision
     post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
 
-    # Filter prepared items for a non-duplicate candidate to post now
-    post_candidates = _select_post_candidates(prepared, window_hours, post_event_skip_hours)
+    candidates = _queue_candidates(articles, window_hours)
 
+    # 2. If we have candidates, try to summarize and post the first valid one
     posted = False
-    if post_candidates:
-        item = post_candidates[0]
-        t1 = compose_tweet_1(item["headline"], item["bullets"])
-        t2 = compose_tweet_2(item["url"])
-        tid1, tid2 = publish(t1, t2)
-        # Stage ALL prepared items (including the used one) into the queue, newest first, minus the one we just used
-        rest = [x for x in prepared if x is not item]
-        if rest:
-            # Skip anything already posted within the posting decision window
-            rest2 = _queue_candidates(rest, window_hours, post_event_skip_hours)
-            # Reverse to ensure newest is at the top of the stack (end of list)
-            if rest2:
-                push_many(list(reversed(rest2)))
-        if tid1:
-            posted = True
-            # Only mark as posted on success; include tweet_id so we can trace to X
-            mark_posted(
-                url=item["url"],
-                event_uri=item["event_uri"],
-                article_uri=item.get("article_uri", ""),
-                story_uri=item.get("story_uri", ""),
-                fingerprint=item["fingerprint"],
-                tweet_id=str(tid1),
-            )
-        else:
-            logger.warning(
-                "main: publish failed event=%s fp=%s url=%s",
-                item.get("event_uri", ""),
-                item.get("fingerprint", ""),
-                item.get("url", ""),
-            )
-            # Requeue the failed candidate so it can be attempted next run
-            push_many([item])
-    else:
-        # No fresh candidates found; push all prepared into queue for later
-        if prepared:
-            # Skip anything already posted within the posting decision window
-            post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
-            to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
-            if to_stage:
-                push_many(list(reversed(to_stage)))
 
+    if candidates:
+        # We iterate through candidates. The first one that passes summarization gets posted.
+        # The rest get queued as raw.
+
+        for i, art in enumerate(candidates):
+            url = art.get("url", "")
+            event_uri = art.get("event_uri", "")
+            fp = art.get("fingerprint", "")
+            source_title = art.get("title", "")
+
+            if skip_summarizer:
+                # Fast path for testing/skipping AI
+                head = (source_title or "Bitcoin mining update").strip()[
+                    :120
+                ] or "Bitcoin mining update"
+                art["headline"] = head
+                art["bullets"] = []
+
+                # Post immediately
+                t1 = compose_tweet_1(head, [])
+                t2 = compose_tweet_2(url)
+                tid1, tid2 = publish(t1, t2)
+
+                if tid1:
+                    posted = True
+                    mark_posted(
+                        url=url,
+                        event_uri=event_uri,
+                        article_uri=art.get("article_uri", ""),
+                        story_uri=art.get("story_uri", ""),
+                        fingerprint=fp,
+                        tweet_id=str(tid1),
+                    )
+                    # Queue the REST of the candidates (raw)
+                    remaining = candidates[i + 1 :]
+                    if remaining:
+                        from src.article_queue import push_many
+
+                        push_many(list(reversed(remaining)))
+                    break  # Done
+                else:
+                    # Failed to publish, maybe try next? Or just queue it?
+                    # Existing logic usually retries or queues. Let's queue it and try next.
+                    from src.article_queue import push_many
+
+                    push_many([art])
+                    continue
+
+            # Real Summarization
+            headline, bullets = summarize_for_miners(art)
+
+            if not headline or not bullets:
+                logger.info("main: skipping not-relevant article event=%s url=%s", event_uri, url)
+                # It was processed but rejected. Do NOT queue it.
+                continue
+
+            # Deterministic de-dup across headline/bullets
+            headline2, bullets2 = sanitize_summary(headline, bullets, source_title)
+            if not bullets2:
+                logger.info(
+                    "main: skipping after sanitize (empty bullets) event=%s url=%s", event_uri, url
+                )
+                continue
+
+            # Save to fetched_articles for daily brief
+            save_fetched_article(
+                fingerprint=fp,
+                headline=headline2,
+                bullets=bullets2,
+                url=url,
+                event_uri=event_uri,
+                source_title=source_title,
+                source_date=art.get("date", ""),
+            )
+
+            # Update article object
+            art["headline"] = headline2
+            art["bullets"] = bullets2
+
+            # Attempt to publish
+            t1 = compose_tweet_1(headline2, bullets2)
+            t2 = compose_tweet_2(url)
+            tid1, tid2 = publish(t1, t2)
+
+            if tid1:
+                posted = True
+                mark_posted(
+                    url=url,
+                    event_uri=event_uri,
+                    article_uri=art.get("article_uri", ""),
+                    story_uri=art.get("story_uri", ""),
+                    fingerprint=fp,
+                    tweet_id=str(tid1),
+                )
+
+                # We successfully posted.
+                # Queue the REST of the candidates (raw) for later.
+                # We do NOT queue the one we just posted.
+                remaining = candidates[i + 1 :]
+                if remaining:
+                    from src.article_queue import push_many
+
+                    # Push in reverse order so the first item in 'remaining' (the next best candidate)
+                    # ends up at the top of the stack (last in list).
+                    push_many(list(reversed(remaining)))
+
+                break  # Stop processing candidates
+            else:
+                logger.warning("main: publish failed event=%s fp=%s url=%s", event_uri, fp, url)
+                # Failed to publish valid content. Queue it so we can try again later (maybe transient error).
+                from src.article_queue import push_many
+
+                push_many([art])
+                # Continue to try the next candidate in this run?
+                # Yes, let's try to find *something* to post.
+                continue
+
+    # 3. If we went through all candidates and posted nothing (or had no candidates), try queue fallback
     if not posted:
-        # Try queue fallback, skipping duplicates within the posting decision window
+        # If we had candidates but none were relevant/postable, they are already handled (rejected or queued if failed publish)
+        # So we just fall back to the queue.
+
+        # Note: If we had candidates but they were all rejected as irrelevant, we effectively "wasted" those API calls
+        # but that's the price of filtering. We still want to try the queue.
+
+        # However, if we had candidates and simply didn't post because they were irrelevant,
+        # we should make sure we didn't lose the "raw" ones that we didn't even touch?
+        # The loop `for i, art in enumerate(candidates)` goes through ALL of them if we don't break.
+        # So if we finish the loop and posted=False, it means we checked everyone and they were either irrelevant or failed publish.
+        # So nothing left to queue from `candidates`.
+
         _fallback_from_queue(window_hours, post_event_skip_hours)
 
 
