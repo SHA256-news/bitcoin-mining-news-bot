@@ -26,7 +26,8 @@ jobs:
       TOPIC_QUERY: ${{ vars.TOPIC_QUERY }}
       # De-dup controls (optional repo Variables)
       DEDUP_WINDOW_HOURS: ${{ vars.DEDUP_WINDOW_HOURS }}
-      EVENT_DEDUP_HOURS: "0"
+      # Event-level dedup window (in hours). Use same as main window by default.
+      EVENT_DEDUP_HOURS: "72"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -87,6 +87,11 @@ def _posted_load() -> Dict:
         _migrate_seq("posted_article_uris", "article_uri", "article_uri")
         _migrate_seq("posted_fingerprints", "fp", "fingerprint")
 
+    # Migration: Ensure all items have normalized URLs if possible
+    for it in items:
+        if it.get("url") and not it.get("norm_url"):
+            it["norm_url"] = _normalize_url(it["url"])
+
     # Inject MANUAL_POSTED_URLS from env (comma-separated)
     # This allows users to block specific URLs if X sync is failing
     manual_env = os.getenv("MANUAL_POSTED_URLS", "")
@@ -97,7 +102,14 @@ def _posted_load() -> Dict:
         existing_urls = {it.get("url") for it in items if it.get("url")}
         for murl in manual_urls:
             if murl not in existing_urls:
-                items.append({"url": murl, "ts": now, "source": "manual_env"})
+                items.append(
+                    {
+                        "url": murl,
+                        "norm_url": _normalize_url(murl),
+                        "ts": now,
+                        "source": "manual_env",
+                    }
+                )
 
     return {"items": items}
 
@@ -134,7 +146,7 @@ def _now_ts() -> int:
     return int(time.time())
 
 
-def _prune(state: Dict, window_hours: int = 72) -> None:
+def _prune(state: Dict, window_hours: float = 72) -> None:
     cutoff = _now_ts() - window_hours * 3600
     # prune summary cache
     cache: List[Dict] = state.get("summary_cache") or []
@@ -147,7 +159,7 @@ def _prune(state: Dict, window_hours: int = 72) -> None:
     ]
 
 
-def _posted_prune(window_hours: int = 168) -> None:
+def _posted_prune(window_hours: float = 168) -> None:
     obj = _posted_load()
     cutoff = _now_ts() - window_hours * 3600
     items: List[Dict] = obj.get("items") or []
@@ -173,12 +185,18 @@ def already_posted(
     event_uri: str = "",
     fingerprint: str = "",
     article_uri: str = "",
-    window_hours: int = 72,
-    event_window_hours: int | None = None,
+    story_uri: str = "",
+    window_hours: float = 72,
+    event_window_hours: float | None = None,
 ) -> bool:
-    """Return True if we've posted this item recently (rebuilt, minimal and robust).
+    """Return True if we've posted this item recently.
 
-    Checks, in order: article_uri, event_uri (with its own window), fingerprint, url.
+    Priority of identity keys:
+      1) article_uri
+      2) story_uri (if available)
+      3) event_uri (with its own window)
+      4) fingerprint
+      5) URL (exact and normalized)
     """
     import logging as _logging
 
@@ -199,7 +217,17 @@ def already_posted(
                 it.get("article_uri") == article_uri
                 and (now - int(it.get("ts", 0))) <= window_hours * 3600
             ):
-                _log.debug("already_posted: match=article_uri uri=%s", article_uri)
+                _log.info("already_posted: match=article_uri uri=%s", article_uri)
+                return True
+
+    # Story URI (if Event Registry provides it on articles)
+    if story_uri:
+        for it in items:
+            if (
+                it.get("story_uri") == story_uri
+                and (now - int(it.get("ts", 0))) <= window_hours * 3600
+            ):
+                _log.info("already_posted: match=story_uri uri=%s", story_uri)
                 return True
 
     # Event URI with its own window
@@ -207,7 +235,7 @@ def already_posted(
     if event_uri:
         for it in items:
             if it.get("event_uri") == event_uri and (now - int(it.get("ts", 0))) <= ev_win * 3600:
-                _log.debug("already_posted: match=event event=%s", event_uri)
+                _log.info("already_posted: match=event event=%s window_h=%s", event_uri, ev_win)
                 return True
 
     # Fingerprint
@@ -217,31 +245,28 @@ def already_posted(
                 it.get("fingerprint") == fingerprint
                 and (now - int(it.get("ts", 0))) <= window_hours * 3600
             ):
-                _log.debug("already_posted: match=fingerprint fp=%s", fingerprint)
+                _log.info("already_posted: match=fingerprint fp=%s", fingerprint)
                 return True
 
     # URL (Normalized)
     if url:
         norm_url = _normalize_url(url)
         for it in items:
-            # Check against both raw and normalized stored URLs if possible,
-            # but for now we just normalize the candidate and check if it matches
-            # a normalized version of the stored URL.
+            # Check against both raw and normalized stored URLs
             stored_url = it.get("url", "")
+            stored_norm = it.get("norm_url", "") or _normalize_url(stored_url)
+
             if not stored_url:
                 continue
 
             # Direct match
             if stored_url == url and (now - int(it.get("ts", 0))) <= window_hours * 3600:
-                _log.debug("already_posted: match=url (exact) url=%s", url)
+                _log.info("already_posted: match=url (exact) url=%s", url)
                 return True
 
             # Normalized match
-            if (
-                _normalize_url(stored_url) == norm_url
-                and (now - int(it.get("ts", 0))) <= window_hours * 3600
-            ):
-                _log.debug("already_posted: match=url (normalized) url=%s", url)
+            if stored_norm == norm_url and (now - int(it.get("ts", 0))) <= window_hours * 3600:
+                _log.info("already_posted: match=url (normalized) url=%s", url)
                 return True
 
     return False
@@ -250,10 +275,11 @@ def already_posted(
 def _posted_identity_equal(a: Dict, b: Dict) -> bool:
     """Return True when two posted entries refer to the same underlying item.
 
-    Identity is any matching non-empty value among article_uri, event_uri,
-    fingerprint or url. This is used consistently for mark_posted dedup.
+    Identity is any matching non-empty value among article_uri, event_uri, story_uri,
+    fingerprint, url or norm_url. This is used consistently for mark_posted
+    dedup so we only keep one record per underlying story.
     """
-    for k in ("article_uri", "event_uri", "fingerprint", "url"):
+    for k in ("article_uri", "event_uri", "story_uri", "fingerprint", "url", "norm_url"):
         if a.get(k) and b.get(k) and a.get(k) == b.get(k):
             return True
     return False
@@ -264,9 +290,15 @@ def mark_posted(
     event_uri: str = "",
     fingerprint: str = "",
     article_uri: str = "",
+    story_uri: str = "",
+    tweet_id: str = "",
     max_entries: int = 2000,
 ) -> None:
-    """Record this item as posted (rebuilt, minimal and robust)."""
+    """Record this item as posted (rebuilt, minimal and robust).
+
+    We persist all identity keys we know about the story so that later
+    `already_posted` checks can reliably detect duplicates across runs.
+    """
     import logging as _logging
 
     _log = _logging.getLogger(__name__)
@@ -278,12 +310,17 @@ def mark_posted(
         entry: Dict[str, Any] = {"ts": now}
         if url:
             entry["url"] = url
+            entry["norm_url"] = _normalize_url(url)
         if event_uri:
             entry["event_uri"] = event_uri
         if article_uri:
             entry["article_uri"] = article_uri
+        if story_uri:
+            entry["story_uri"] = story_uri
         if fingerprint:
             entry["fingerprint"] = fingerprint
+        if tweet_id:
+            entry["tweet_id"] = str(tweet_id)
 
         # Deduplicate by any present key
         items = [it for it in items if not _posted_identity_equal(it, entry)]
@@ -292,7 +329,15 @@ def mark_posted(
             items = items[-max_entries:]
         obj["items"] = items
         _posted_save(obj)
-        _log.info("mark_posted: success url=%s", url)
+        _log.info(
+            "mark_posted: success url=%s event_uri=%s article_uri=%s story_uri=%s fingerprint=%s tweet_id=%s",
+            url,
+            event_uri,
+            article_uri,
+            story_uri,
+            fingerprint,
+            tweet_id,
+        )
     except Exception as e:
         _log.error("mark_posted: failed to save state: %s", e)
 

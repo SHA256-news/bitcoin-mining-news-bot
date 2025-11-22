@@ -628,8 +628,11 @@ def _build_article_from_er(a: Dict) -> Dict | None:
         "title": a.get("title") or "",
         "url": url,
         "text": a.get("body") or a.get("text") or "",
+        # Primary Event Registry identifiers for story identity
         "event_uri": a.get("eventUri") or a.get("eventUriWgt") or "",
         "article_uri": uri,
+        # Some ER payloads may include a storyUri/cluster identifier; capture if present
+        "story_uri": a.get("storyUri") or "",
         "date": a.get("dateTime") or a.get("date") or "",
         "source": (
             (a.get("source") or {}).get("title") if isinstance(a.get("source"), dict) else ""

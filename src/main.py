@@ -82,24 +82,35 @@ def run():
     prepared = []
     # Configurable de-dup windows
     window_hours = int(os.getenv("DEDUP_WINDOW_HOURS", "72") or "72")
-    event_window_hours_str = os.getenv("EVENT_DEDUP_HOURS")
-    if event_window_hours_str and event_window_hours_str.strip().isdigit():
-        event_window_hours = int(event_window_hours_str)
-    else:
-        event_window_hours = window_hours
+    # EVENT_DEDUP_HOURS controls how long we treat an Event Registry event URI as
+    # "recent". Values <= 0 or invalid values fall back to the main window so we
+    # never accidentally disable event-based deduplication.
+    event_window_hours = window_hours
+    raw_event_win = (os.getenv("EVENT_DEDUP_HOURS", "") or "").strip()
+    if raw_event_win:
+        try:
+            ev_val = int(raw_event_win)
+            if ev_val > 0:
+                event_window_hours = ev_val
+        except Exception:
+            # Ignore bad values and keep default
+            pass
 
     def _dedupe_prepared(items: list[dict]) -> list[dict]:
-        """Deduplicate prepared items by event_uri, fingerprint, article_uri, then URL.
+        """Deduplicate prepared items using story/article/event URIs, then fingerprint, then URL.
 
-        This keeps the original grouping priority but makes the intent explicit.
+        This mirrors the StoryIdentity priority: article_uri > story_uri > event_uri
+        > fingerprint > url. Within a single run this prevents us from staging
+        multiple variants of the same underlying story.
         """
         seen: set[str] = set()
         out: list[dict] = []
         for it in items:
             k = (
-                (it.get("event_uri") or "").strip()
+                (it.get("article_uri") or "").strip()
+                or (it.get("story_uri") or "").strip()
+                or (it.get("event_uri") or "").strip()
                 or (it.get("fingerprint") or "").strip()
-                or (it.get("article_uri") or "").strip()
                 or (it.get("url") or "").strip()
             )
             if not k or k in seen:
@@ -122,6 +133,7 @@ def run():
                 event_uri=it.get("event_uri", ""),
                 fingerprint=it.get("fingerprint", ""),
                 article_uri=it.get("article_uri", ""),
+                story_uri=it.get("story_uri", ""),
                 window_hours=window_hours,
                 event_window_hours=event_window_hours,
             )
@@ -145,6 +157,7 @@ def run():
                 event_uri=item.get("event_uri", ""),
                 fingerprint=item.get("fingerprint", ""),
                 article_uri=item.get("article_uri", ""),
+                story_uri=item.get("story_uri", ""),
                 window_hours=window_hours,
                 event_window_hours=event_window_hours,
             )
@@ -167,6 +180,7 @@ def run():
             event_uri=q.get("event_uri", ""),
             fingerprint=q.get("fingerprint", ""),
             article_uri=q.get("article_uri", ""),
+            story_uri=q.get("story_uri", ""),
             window_hours=window_hours,
             event_window_hours=post_event_skip_hours,
         ):
@@ -181,7 +195,9 @@ def run():
                 url=q.get("url", ""),
                 event_uri=q.get("event_uri", ""),
                 article_uri=q.get("article_uri", ""),
+                story_uri=q.get("story_uri", ""),
                 fingerprint=q.get("fingerprint", ""),
+                tweet_id=str(tid1),
             )
         else:
             logger.warning(
@@ -196,6 +212,7 @@ def run():
         url = art.get("url", "")
         event_uri = art.get("event_uri", "")
         article_uri = art.get("article_uri", "")
+        story_uri = art.get("story_uri", "")
         fp = art.get("fingerprint", "")
         source_title = art.get("title", "")
         # Bypass dedup if DRY_RUN, otherwise enforce configured windows
@@ -204,6 +221,7 @@ def run():
             event_uri=event_uri,
             fingerprint=fp,
             article_uri=article_uri,
+            story_uri=story_uri,
             window_hours=window_hours,
             event_window_hours=event_window_hours,
         ):
@@ -257,6 +275,7 @@ def run():
                 "url": url,
                 "event_uri": event_uri,
                 "article_uri": article_uri,
+                "story_uri": story_uri,
                 "fingerprint": fp,
             }
         )
@@ -313,12 +332,14 @@ def run():
                 push_many(rest2)
         if tid1:
             posted = True
-            # Only mark as posted on success
+            # Only mark as posted on success; include tweet_id so we can trace to X
             mark_posted(
                 url=item["url"],
                 event_uri=item["event_uri"],
                 article_uri=item.get("article_uri", ""),
+                story_uri=item.get("story_uri", ""),
                 fingerprint=item["fingerprint"],
+                tweet_id=str(tid1),
             )
         else:
             logger.warning(

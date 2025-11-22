@@ -162,6 +162,7 @@ def sync_posted_from_x(max_heads: int = 50) -> Dict:
 
     for head, url in heads[:max_heads]:
         if url:
+            # We only know the URL here; tweet_id and URIs are not available.
             mark_posted(url=url)
             synced += 1
             continue

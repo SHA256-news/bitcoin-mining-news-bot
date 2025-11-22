@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Bitcoin Miner's Report: A Shifting Landscape | SHA256 News</title>
+    <meta name="description" content="Bitcoin mining editorial brief on mining pivots, hardware demand, regulation, and cloud mining for November 19, 2025" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { height: 100%; }
+      .font-serif { font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; }
+      .chart-container {
+        position: relative;
+        width: 100%;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
+        height: 300px;
+        max-height: 400px;
+      }
+      @media (min-width: 768px) {
+        .chart-container {
+          height: 350px;
+        }
+      }
+      .flow-arrow {
+        font-size: 2rem;
+        color: #38bdf8;
+        line-height: 1;
+      }
+      .flow-box {
+        @apply bg-zinc-900 border border-zinc-700 rounded-lg p-4 text-center text-zinc-100 font-semibold shadow-sm w-full;
+      }
+    </style>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100">
+    <div class="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+      <header class="border-b border-zinc-800">
+        <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+          <div class="py-6 text-center">
+            <h1 class="font-serif text-4xl sm:text-5xl"><a href="/" class="hover:text-zinc-300">SHA256 News</a></h1>
+            <div class="mt-2 text-[11px] tracking-widest uppercase text-zinc-400">
+              Bitcoin Mining • Editorial Brief
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1 mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-12">
+        <article class="prose prose-lg prose-invert prose-zinc max-w-none">
+          <header class="mb-8 border-b border-zinc-800 pb-4">
+            <p class="text-xs uppercase tracking-[0.2em] text-zinc-400 mb-2">The Bitcoin Miner's Report</p>
+            <h2 class="font-serif text-3xl sm:text-4xl mb-2">A Shifting Landscape</h2>
+            <p class="text-sm text-zinc-400">Key insights from November 19, 2025</p>
+          </header>
+
+          <section class="not-prose mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+
+                <section class="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6">
+                    <h2 class="text-3xl font-bold text-zinc-50 mb-3">The Great Pivot: From Mining to AI &amp; HPC</h2>
+                    <p class="text-zinc-300">The most significant trend is the strategic pivot by major mining veterans. Faced with declining profitability, established players are leveraging their infrastructure and capital to chase the boom in AI and High-Performance Computing (HPC). This isn't just diversification; for some, it's a full exit.</p>
+                </section>
+
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-2 text-center">Bitfury's $1B Exit</h3>
+                    <p class="text-6xl font-bold text-sky-400 mb-3">$1B</p>
+                    <p class="text-center text-zinc-300">After 14 years, Bitfury is exiting Bitcoin mining to launch a $1 Billion investment fund targeting AI, Quantum Computing, and decentralized tech.</p>
+                </div>
+                
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-4 text-center">Profitability Headwinds</h3>
+                    <div class="chart-container">
+                        <canvas id="profitabilityChart"></canvas>
+                    </div>
+                    <p class="text-zinc-300 mt-4">The "why" behind the pivot is clear. Mining difficulty has surged 52% year-over-year, while the Bitcoin price has fallen 26.2% from its recent October peak, squeezing margins for all but the most efficient operators.</p>
+                </div>
+
+                <section class="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 mt-4">
+                    <h2 class="text-3xl font-bold text-zinc-50 mb-3">The Hardware Paradox</h2>
+                    <p class="text-zinc-300">Contradicting the profitability crunch, hardware manufacturer Canaan (CAN) posted stellar Q3 results. This suggests a "fork" in the market: while some veterans exit, well-capitalized (often North American) miners are aggressively upgrading to next-generation hardware, driving a race for absolute efficiency.</p>
+                </section>
+
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-4 text-center">Canaan (CAN) Revenue Surge (Q3)</h3>
+                    <div class="chart-container">
+                        <canvas id="canaanChart"></canvas>
+                    </div>
+                    <p class="text-zinc-300 mt-4">Canaan's revenue doubled to $150.5 million, a 104.4% year-over-year increase, smashing expectations. This was driven by high demand for new mining rigs, particularly from large-scale North American buyers.</p>
+                </div>
+
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-2 text-center">Canaan (CAN) Stock Jump</h3>
+                    <p class="text-6xl font-bold text-emerald-400 mb-3">+21%</p>
+                    <p class="text-center text-zinc-300">The market reacted strongly to the news, with CAN stock surging 21% on Tuesday as investors recognized the robust demand for next-gen mining equipment.</p>
+                </div>
+
+                <section class="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 mt-4">
+                    <h2 class="text-3xl font-bold text-zinc-50 mb-3">The Regulatory Hammer: Energy Theft</h2>
+                    <p class="text-zinc-300">Operational risk remains a critical factor, especially in jurisdictions with unclear regulations. Malaysia has become a case study, with the government launching a massive crackdown on illegal mining operations that have cost the national utility over a billion dollars.</p>
+                </section>
+
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 flex flex-col justify-center items-center">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-2 text-center">Malaysia's Loss to Power Theft</h3>
+                    <p class="text-5xl font-bold text-red-400 mb-3">$1.11B</p>
+                    <p class="text-center text-zinc-300">(RM4.57 Billion) from 2020 to August 2025. This staggering loss from 13,827 illegal premises is forcing regulators to act decisively.</p>
+                </div>
+
+                <div class="bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6">
+                    <h3 class="text-xl font-semibold text-zinc-50 mb-4 text-center">Malaysia's Response Flow</h3>
+                    <div class="flex flex-col space-y-2 md:space-y-4 items-center justify-center h-full">
+                        <div class="flow-box w-3/4">Illegal Mining Operations</div>
+                        <div class="flow-arrow transform rotate-90">↓</div>
+                        <div class="flow-box w-3/4">Massive Utility Losses Detected</div>
+                        <div class="flow-arrow transform rotate-90">↓</div>
+                        <div class="flow-box w-3/4">Crackdown &amp; Smart Meter Rollout</div>
+                    </div>
+                    <p class="text-zinc-300 mt-4">The government is responding by installing smart meters to detect suspicious energy use in real-time, aiming to curb future losses.</p>
+                </div>
+
+                <section class="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 mt-4">
+                    <h2 class="text-3xl font-bold text-zinc-50 mb-3">Wall Street's Selective Bets</h2>
+                    <p class="text-zinc-300 mb-4">Analysts are not treating all miners equally. New coverage shows strong optimism for large-scale, publicly-traded miners like Riot and IREN, suggesting a belief in their ability to scale and navigate the efficiency race. However, Cipher Mining's (CIFR) 16% drop, even after announcing $1.4B in funding for its <em>own</em> HPC pivot, shows market uncertainty and selectivity.</p>
+                    <div class="chart-container">
+                        <canvas id="analystChart"></canvas>
+                    </div>
+                    <p class="text-zinc-300 mt-4">The chart shows the newly initiated analyst price target upside for Riot and IREN, contrasted with Cipher's recent one-day drop. This highlights the market's mixed, highly-selective sentiment toward the sector.</p>
+                </section>
+
+                <section class="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-lg shadow-md p-6 mt-4">
+                    <h2 class="text-3xl font-bold text-zinc-50 mb-3">The Retail On-Ramp: Cloud Mining</h2>
+                    <p class="text-zinc-300 mb-4">While industrial giants grapple with billion-dollar pivots and regulatory hammers, the retail narrative remains focused on accessibility. Cloud mining platforms are being heavily marketed as an "easy" and "hardware-free" way for individuals to earn Bitcoin, abstracting away all the operational complexities.</p>
+                    <div class="flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4 items-center justify-center h-full p-4">
+                        <div class="flow-box">User Pays Platform Fee</div>
+                        <div class="flow-arrow hidden md:block">→</div>
+                        <div class="flow-arrow md:hidden transform rotate-90">↓</div>
+                        <div class="flow-box">Cloud Co. Operates Data Center</div>
+                        <div class="flow-arrow hidden md:block">→</div>
+                        <div class="flow-arrow md:hidden transform rotate-90">↓</div>
+                        <div class="flow-box">User Receives BTC Rewards</div>
+                    </div>
+                    <p class="text-zinc-300 mt-4">This model shows the simple value proposition offered to retail users, standing in stark contrast to the complex realities faced by industrial-scale miners today.</p>
+                </section>
+
+            </div>
+          </section>
+        </article>
+
+        <div class="mt-12 pt-8 border-t border-zinc-800 text-center">
+          <a href="/" class="text-zinc-400 underline hover:text-zinc-100">← Back to Home</a>
+        </div>
+      </main>
+
+      <footer class="border-t border-zinc-800 py-6 text-sm text-zinc-400 text-center">
+        <div>© 2025 SHA256 Media — Bitcoin Mining Only</div>
+      </footer>
+    </div>
+
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+
+            const chartColors = ['#38bdf8', '#fb923c', '#eab308', '#22c55e', '#a855f7'];
+            const negativeColor = '#ef4444';
+            const positiveColor = '#22c55e';
+
+            const mandatoryTooltipConfig = {
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                const item = tooltipItems[0];
+                                let label = item.chart.data.labels[item.dataIndex];
+                                if (Array.isArray(label)) {
+                                  return label.join(' ');
+                                } else {
+                                  return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            const profitabilityCtx = document.getElementById('profitabilityChart').getContext('2d');
+            new Chart(profitabilityCtx, {
+                type: 'bar',
+                data: {
+                    labels: [['Mining Difficulty', '(YoY)'], ['BTC Price', '(from Oct Peak)']],
+                    datasets: [{
+                        label: '% Change',
+                        data: [52, -26.2],
+                        backgroundColor: [chartColors[0], negativeColor],
+                        borderColor: [chartColors[0], negativeColor],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: mandatoryTooltipConfig.plugins.tooltip
+                    }
+                }
+            });
+
+            const canaanCtx = document.getElementById('canaanChart').getContext('2d');
+            new Chart(canaanCtx, {
+                type: 'bar',
+                data: {
+                    labels: [['Q3 2024 Total', 'Revenue'], ['Q3 2025 Total', 'Revenue']],
+                    datasets: [{
+                        label: 'Revenue (in Millions USD)',
+                        data: [73.63, 150.5],
+                        backgroundColor: [chartColors[1], chartColors[0]],
+                        borderColor: [chartColors[1], chartColors[0]],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value + 'M';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: mandatoryTooltipConfig.plugins.tooltip
+                    }
+                }
+            });
+
+            const analystCtx = document.getElementById('analystChart').getContext('2d');
+            new Chart(analystCtx, {
+                type: 'bar',
+                data: {
+                    labels: [['Riot Platforms', '(RIOT)'], ['IREN Ltd.', '(IREN)'], ['Cipher Mining', '(CIFR) (1-Day)']],
+                    datasets: [{
+                        label: 'Analyst Upside / 1-Day Change (%)',
+                        data: [80, 64, -16.1],
+                        backgroundColor: [positiveColor, positiveColor, negativeColor],
+                        borderColor: [positiveColor, positiveColor, negativeColor],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: mandatoryTooltipConfig.plugins.tooltip
+                    }
+                }
+            });
+
+        });
+    </script>
+
+</body>
+</html>
