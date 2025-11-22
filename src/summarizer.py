@@ -1,6 +1,7 @@
 import os
 import logging
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
+import random
 
 import time
 import re
@@ -15,6 +16,14 @@ from src.state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimitError(Exception):
+    """Raised when API returns 429 rate limit error."""
+
+    def __init__(self, message: str, retry_after: float = 0):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 GENERIC_BULLETS = {
@@ -81,25 +90,60 @@ def _heuristic_bullets(title: str, text: str) -> list[str]:
     return [p[:180] for p in picks[:3]]
 
 
-def _throttle(model_name: str) -> None:
-    """Rate-limit Gemini calls per-model using simple in-process timestamps.
+# Global tracking per model: {model_name: [timestamp1, timestamp2, ...]}
+_request_history: Dict[str, List[float]] = {}
 
-    This preserves the existing behavior while making the throttling reusable.
+
+def _throttle(model_name: str) -> None:
+    """Rate-limit Gemini calls using sliding window to prevent burst violations.
+
+    Maintains a history of recent requests and enforces RPM limits by waiting
+    for the oldest request to expire if we're at the limit.
     """
     rpm_defaults = {
         "gemini-2.5-pro": int(os.getenv("GEMINI_PRO_RPM", "2")),
         "gemini-2.5-flash": int(os.getenv("GEMINI_FLASH_RPM", "10")),
     }
     rpm = rpm_defaults.get(model_name, 10)
-    # minimal inter-call delay in seconds
-    min_gap = max(0.0, 60.0 / max(1, rpm))
-    last_key = f"_last_call_{model_name}"
-    last = globals().get(last_key, 0.0)
+    window_seconds = 60.0
+
+    # Get or create request history for this model
+    history = _request_history.setdefault(model_name, [])
     now = time.time()
-    sleep_s = last + min_gap - now
-    if sleep_s > 0:
-        time.sleep(sleep_s)
-    globals()[last_key] = time.time()
+
+    # Remove requests outside the sliding window
+    cutoff = now - window_seconds
+    history[:] = [ts for ts in history if ts > cutoff]
+
+    # If we're at the limit, wait until oldest request expires
+    if len(history) >= rpm:
+        oldest = history[0]
+        wait_time = (oldest + window_seconds) - now
+        if wait_time > 0:
+            logger.info(
+                "Rate limit: waiting %.1fs for %s (have %d/%d requests in window)",
+                wait_time,
+                model_name,
+                len(history),
+                rpm,
+            )
+            time.sleep(wait_time)
+            # Clean up again after sleeping
+            now = time.time()
+            cutoff = now - window_seconds
+            history[:] = [ts for ts in history if ts > cutoff]
+
+    # Record this request
+    history.append(time.time())
+
+
+def _exponential_backoff_with_jitter(
+    attempt: int, base_delay: float = 1.0, max_delay: float = 60.0
+) -> float:
+    """Calculate exponential backoff delay with jitter."""
+    delay = min(base_delay * (2**attempt), max_delay)
+    jitter = random.uniform(0, delay * 0.1)  # ±10% jitter
+    return delay + jitter
 
 
 def _call_gemini(
@@ -107,39 +151,24 @@ def _call_gemini(
     api_key: str | None,
     system_prompt: str,
     user_prompt: str,
+    max_retries: int = 3,
 ) -> str:
-    """Call Gemini with JSON response, budget checks, throttle, and single retry.
+    """Call Gemini with JSON response, budget checks, throttle, and exponential backoff.
 
-    The logic is factored out of summarize_for_miners but kept bit-for-bit
-    compatible with the previous implementation.
+    Raises RateLimitError on 429 to allow intelligent fallback to Flash.
     """
     if gemini_remaining(model_name) <= 0:
         raise RuntimeError(f"no remaining daily budget for {model_name}")
+
     _throttle(model_name)
     client = genai.Client(api_key=api_key) if api_key else genai.Client()
     config = types.GenerateContentConfig(
         temperature=0.4,
         response_mime_type="application/json",
     )
-    try:
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=[system_prompt, user_prompt],
-            config=config,
-        )
-        gemini_increment(model_name)
-        return resp.text or "{}"
-    except Exception as e:
-        msg = str(e)
-        # Parse retry delay seconds if present
-        m = re.search(r"retry in (\d+(?:\.\d+)?)s|seconds: (\d+)", msg, flags=re.I)
-        if m:
-            try:
-                secs = float(next(g for g in m.groups() if g))
-                time.sleep(min(secs, 30.0))
-            except Exception:
-                time.sleep(30)
-            # single retry
+
+    for attempt in range(max_retries):
+        try:
             resp = client.models.generate_content(
                 model=model_name,
                 contents=[system_prompt, user_prompt],
@@ -147,7 +176,62 @@ def _call_gemini(
             )
             gemini_increment(model_name)
             return resp.text or "{}"
-        raise
+        except Exception as e:
+            msg = str(e).lower()
+
+            # Detect 429 rate limit errors
+            if "429" in msg or "rate limit" in msg or "quota" in msg:
+                # Parse Retry-After header or delay from error message
+                retry_after = 0.0
+                m = re.search(r"retry[- ]?after[:\s]*(\d+)", msg, flags=re.I)
+                if not m:
+                    m = re.search(r"retry in (\d+(?:\.\d+)?)s|seconds: (\d+)", msg, flags=re.I)
+                if m:
+                    try:
+                        retry_after = float(next(g for g in m.groups() if g))
+                    except Exception:
+                        pass
+
+                logger.warning(
+                    "Rate limit (429) from %s on attempt %d/%d: %s",
+                    model_name,
+                    attempt + 1,
+                    max_retries,
+                    str(e)[:100],
+                )
+
+                # For 429 errors, raise immediately to allow fallback to Flash
+                # Don't waste retries on rate limits
+                raise RateLimitError(str(e), retry_after=retry_after)
+
+            # For other errors, use exponential backoff
+            if attempt < max_retries - 1:
+                # Parse retry delay if present in error message
+                m = re.search(r"retry in (\d+(?:\.\d+)?)s|seconds: (\d+)", msg, flags=re.I)
+                if m:
+                    try:
+                        delay = float(next(g for g in m.groups() if g))
+                        delay = min(delay, 30.0)
+                    except Exception:
+                        delay = _exponential_backoff_with_jitter(attempt)
+                else:
+                    delay = _exponential_backoff_with_jitter(attempt)
+
+                logger.warning(
+                    "API error from %s (attempt %d/%d), retrying in %.1fs: %s",
+                    model_name,
+                    attempt + 1,
+                    max_retries,
+                    delay,
+                    str(e)[:100],
+                )
+                time.sleep(delay)
+            else:
+                # Last attempt, raise the error
+                raise
+
+    # Fallback if all retries exhausted (should never reach here due to raise above)
+    return "{}"
 
 
 def summarize_for_miners(article: Dict) -> Tuple[str, list[str]]:
@@ -198,12 +282,12 @@ Respond ONLY as JSON with keys: relevant (boolean), headline (string when releva
 If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do not use ellipses. Do not end bullets with periods.
 """
 
-    # choose model: prefer pro if allowed; otherwise flash
+    # Choose model: prefer pro if allowed; otherwise flash
     chosen_model = (
         model_name_pro if prefer_pro and gemini_remaining(model_name_pro) > 0 else model_name_flash
     )
     logger.info(
-        "summarizer: model=%s prefer_pro=%s rem_pro=%s rem_flash=%s fp=%s",
+        "summarizer: attempting model=%s prefer_pro=%s rem_pro=%s rem_flash=%s fp=%s",
         chosen_model,
         prefer_pro,
         gemini_remaining(model_name_pro),
@@ -211,31 +295,67 @@ If estimated_total_chars would exceed 260, shorten headline/bullets to fit. Do n
         fp,
     )
 
+    # Try Pro first (if selected), with automatic fallback to Flash on rate limits
     try:
         content = _call_gemini(chosen_model, api_key, system_prompt, user_prompt)
-    except Exception as e:
-        logger.warning("summarizer: API error: %s; falling back", e)
-        # fallback to flash if not already
-        if chosen_model != model_name_flash:
+        logger.info("summarizer: success with model=%s", chosen_model)
+    except RateLimitError as e:
+        # Rate limit hit - immediately fallback to Flash (don't retry Pro)
+        logger.warning(
+            "summarizer: rate limit (429) from %s, falling back to flash (retry_after=%.1fs)",
+            chosen_model,
+            e.retry_after,
+        )
+        if chosen_model != model_name_flash and gemini_remaining(model_name_flash) > 0:
+            # Wait if retry_after was provided
+            if e.retry_after > 0:
+                wait_time = min(e.retry_after, 60.0)  # cap at 60s
+                logger.info("summarizer: waiting %.1fs before trying flash", wait_time)
+                time.sleep(wait_time)
             try:
                 content = _call_gemini(model_name_flash, api_key, system_prompt, user_prompt)
-            except Exception as e2:
-                logger.warning("summarizer: flash fallback failed: %s", e2)
-                # On API failure, fallback but still ensure headline references mining
+                logger.info("summarizer: success with fallback model=flash")
+            except RateLimitError as e2:
+                # Flash also rate limited - use exponential backoff
+                logger.warning("summarizer: flash also rate limited, backing off")
+                wait_time = min(e2.retry_after or 30.0, 60.0)
+                time.sleep(wait_time)
+                # Final offline fallback
+                logger.warning("summarizer: all models rate limited, using offline fallback")
                 h = (title or "Bitcoin mining update").strip()
                 if "mining" not in h.lower() and "miner" not in h.lower():
                     h = f"Bitcoin mining: {h}"[:80]
-                return (
-                    h,
-                    _heuristic_bullets(title, text),
-                )
+                return (h, _heuristic_bullets(title, text))
+            except Exception as e2:
+                logger.warning("summarizer: flash fallback failed: %s", e2)
+                h = (title or "Bitcoin mining update").strip()
+                if "mining" not in h.lower() and "miner" not in h.lower():
+                    h = f"Bitcoin mining: {h}"[:80]
+                return (h, _heuristic_bullets(title, text))
         else:
-            # On API failure, fallback but still provide a usable headline
+            # No Flash budget or Flash was already chosen
+            logger.warning("summarizer: no flash budget available, using offline fallback")
             h = (title or "Update").strip()[:110]
-            return (
-                h,
-                _heuristic_bullets(title, text),
-            )
+            return (h, _heuristic_bullets(title, text))
+    except Exception as e:
+        # Non-rate-limit error - try fallback to flash if not already
+        logger.warning(
+            "summarizer: API error from %s: %s; falling back", chosen_model, str(e)[:100]
+        )
+        if chosen_model != model_name_flash and gemini_remaining(model_name_flash) > 0:
+            try:
+                content = _call_gemini(model_name_flash, api_key, system_prompt, user_prompt)
+                logger.info("summarizer: success with fallback model=flash")
+            except Exception as e2:
+                logger.warning("summarizer: flash fallback failed: %s", str(e2)[:100])
+                h = (title or "Bitcoin mining update").strip()
+                if "mining" not in h.lower() and "miner" not in h.lower():
+                    h = f"Bitcoin mining: {h}"[:80]
+                return (h, _heuristic_bullets(title, text))
+        else:
+            # Offline fallback
+            h = (title or "Update").strip()[:110]
+            return (h, _heuristic_bullets(title, text))
 
     import json
 

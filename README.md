@@ -18,7 +18,13 @@ Copy `.env.example` to `.env` (for local development) and fill values:
 - `EVENTREGISTRY_API_KEY`
 - `GOOGLE_API_KEY`
 - `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`
-- Optional: `ARTICLES_LIMIT`, `TOPIC_QUERY`, `GEMINI_MODEL`
+- Optional: `ARTICLES_LIMIT`, `TOPIC_QUERY`, `GEMINI_MODEL`, `GEMINI_FLASH_MODEL`
+- Rate Limiting (Gemini API):
+  - `GEMINI_PRO_RPM` (requests per minute, default 2 for free tier)
+  - `GEMINI_FLASH_RPM` (requests per minute, default 10 for free tier)
+  - `GEMINI_PRO_RPD` (requests per day, default 50)
+  - `GEMINI_FLASH_RPD` (requests per day, default 250)
+  - See [Gemini API Rate Limits](https://ai.google.dev/gemini-api/docs/quota) for your tier
 - Tuning: `POST_EVENT_SKIP_HOURS` (default 72) controls how long to skip posting about the same event.
 - Emergency Override: `MANUAL_POSTED_URLS` (comma-separated list of URLs to treat as posted, useful if X sync fails).
 - Local/dev toggles: `DRY_RUN=1` to print instead of post; `STATE_FILE` (default `.state/state.json`), `POSTED_FILE` (default `.state/posted.json`).
