@@ -38,9 +38,7 @@ def run():
 
         _dedupe_queue()
         removed_c = _purge_crypto()
-        removed_p = _purge_posted(
-            event_hours=int(os.getenv("QUEUE_POST_EVENT_SKIP_HOURS", "168") or "168")
-        )
+        removed_p = _purge_posted(event_hours=int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72"))
         removed_company = _purge_company_dupes()
         logger.info(
             "main: queue cleanup done deduped=1 purged_crypto=%s purged_posted=%s purged_company_dupes=%s",
@@ -172,41 +170,53 @@ def run():
         Follows the existing behavior: skip duplicates, publish once,
         mark as posted on success, and requeue on failure.
         """
-        from src.queue import pop_one, push_many as _requeue
+        from src.queue import pop_one
 
-        q = pop_one()
-        while q and already_posted(
-            url=q.get("url", ""),
-            event_uri=q.get("event_uri", ""),
-            fingerprint=q.get("fingerprint", ""),
-            article_uri=q.get("article_uri", ""),
-            story_uri=q.get("story_uri", ""),
-            window_hours=window_hours,
-            event_window_hours=post_event_skip_hours,
-        ):
+        # Try up to 3 times to find a postable item
+        failed_items = []
+        for _ in range(3):
             q = pop_one()
-        if not q:
-            return
-        t1 = compose_tweet_1(q["headline"], q["bullets"])
-        t2 = compose_tweet_2(q["url"])
-        tid1, tid2 = publish(t1, t2)
-        if tid1:
-            mark_posted(
+            while q and already_posted(
                 url=q.get("url", ""),
                 event_uri=q.get("event_uri", ""),
+                fingerprint=q.get("fingerprint", ""),
                 article_uri=q.get("article_uri", ""),
                 story_uri=q.get("story_uri", ""),
-                fingerprint=q.get("fingerprint", ""),
-                tweet_id=str(tid1),
-            )
-        else:
-            logger.warning(
-                "main: publish failed (queue) event=%s fp=%s url=%s",
-                q.get("event_uri", ""),
-                q.get("fingerprint", ""),
-                q.get("url", ""),
-            )
-            _requeue([q])
+                window_hours=window_hours,
+                event_window_hours=post_event_skip_hours,
+            ):
+                q = pop_one()
+
+            if not q:
+                break
+
+            t1 = compose_tweet_1(q["headline"], q["bullets"])
+            t2 = compose_tweet_2(q["url"])
+            tid1, tid2 = publish(t1, t2)
+            if tid1:
+                mark_posted(
+                    url=q.get("url", ""),
+                    event_uri=q.get("event_uri", ""),
+                    article_uri=q.get("article_uri", ""),
+                    story_uri=q.get("story_uri", ""),
+                    fingerprint=q.get("fingerprint", ""),
+                    tweet_id=str(tid1),
+                )
+                # Success! Stop trying.
+                break
+            else:
+                logger.warning(
+                    "main: publish failed (queue) event=%s fp=%s url=%s",
+                    q.get("event_uri", ""),
+                    q.get("fingerprint", ""),
+                    q.get("url", ""),
+                )
+                failed_items.append(q)
+
+        if failed_items:
+            from src.queue import bury_many
+
+            bury_many(failed_items)
 
     for art in articles:
         url = art.get("url", "")
@@ -288,7 +298,7 @@ def run():
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
             to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
-                push_many(to_stage)
+                push_many(list(reversed(to_stage)))
         return
 
     # DRY_RUN: preview all threads
@@ -301,7 +311,7 @@ def run():
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
             to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
-                push_many(to_stage)
+                push_many(list(reversed(to_stage)))
         for item in prepared:
             t1 = compose_tweet_1(item["headline"], item["bullets"])
             t2 = compose_tweet_2(item["url"])
@@ -328,8 +338,9 @@ def run():
         if rest:
             # Skip anything already posted within the posting decision window
             rest2 = _queue_candidates(rest, window_hours, post_event_skip_hours)
+            # Reverse to ensure newest is at the top of the stack (end of list)
             if rest2:
-                push_many(rest2)
+                push_many(list(reversed(rest2)))
         if tid1:
             posted = True
             # Only mark as posted on success; include tweet_id so we can trace to X
@@ -357,7 +368,7 @@ def run():
             post_event_skip_hours = int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72")
             to_stage = _queue_candidates(prepared, window_hours, post_event_skip_hours)
             if to_stage:
-                push_many(to_stage)
+                push_many(list(reversed(to_stage)))
 
     if not posted:
         # Try queue fallback, skipping duplicates within the posting decision window

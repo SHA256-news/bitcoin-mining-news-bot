@@ -8,7 +8,10 @@ A bot that fetches Bitcoin mining news from Event Registry, summarizes with Gemi
 It runs on GitHub Actions roughly every 90 minutes and powers a GitHub Pages blog with daily briefs of all fetched articles.
 
 ## Status
-Initial scaffold evolving toward production: runtime config, retries, dedup, and basic tests/linting.
+Production-ready queue logic:
+- **Newest-First Posting:** The bot prioritizes the most recent news.
+- **Robust Retry:** Failed tweets are buried at the bottom of the queue, preventing "poison pill" blocking.
+- **Smart Dedup:** Uses 72h windows for events and URLs to prevent spam.
 
 ## Environment
 Copy `.env.example` to `.env` (for local development) and fill values:
@@ -16,6 +19,7 @@ Copy `.env.example` to `.env` (for local development) and fill values:
 - `GOOGLE_API_KEY`
 - `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`
 - Optional: `ARTICLES_LIMIT`, `TOPIC_QUERY`, `GEMINI_MODEL`
+- Tuning: `POST_EVENT_SKIP_HOURS` (default 72) controls how long to skip posting about the same event.
 - Emergency Override: `MANUAL_POSTED_URLS` (comma-separated list of URLs to treat as posted, useful if X sync fails).
 - Local/dev toggles: `DRY_RUN=1` to print instead of post; `STATE_FILE` (default `.state/state.json`), `POSTED_FILE` (default `.state/posted.json`).
 

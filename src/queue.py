@@ -215,3 +215,15 @@ def pop_one() -> Optional[Dict]:
     item = q.pop()  # LIFO
     _save(q)
     return item
+
+
+def bury_many(items: List[Dict]) -> None:
+    """Push items to the bottom of the stack (start of list) so they are popped last."""
+    q = _load()
+    ts = int(time.time())
+    for it in items:
+        it2 = dict(it)
+        it2["ts"] = ts
+        q.insert(0, it2)
+    q = _dedupe(q)
+    _save(q)
