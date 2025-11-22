@@ -39,6 +39,9 @@ def test_pipeline_dedup_skips_duplicates(
     # Mock already_posted to return False initially
     mock_already.return_value = False
 
+    # Mock publish to return tweet IDs (indicating success)
+    mock_publish.return_value = ("123456", "123457")
+
     # Run
     run()
 
