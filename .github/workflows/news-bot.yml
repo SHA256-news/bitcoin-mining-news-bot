@@ -3,7 +3,7 @@ name: Bitcoin Mining News Bot
 on:
   schedule:
     # Every 3 hours: 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC
-    # 8 runs/day × 2 tweets = 16 POST requests (under 17/day rate limit)
+    # 8 runs/day × 2 tweets = 16 POST requests (tight budget: 16/17 limit)
     - cron: "0 */3 * * *"
   workflow_dispatch: {}
 
@@ -27,6 +27,8 @@ jobs:
       DEDUP_WINDOW_HOURS: ${{ vars.DEDUP_WINDOW_HOURS }}
       # Event-level dedup window (in hours). Use same as main window by default.
       EVENT_DEDUP_HOURS: "72"
+      # Disable retries on rate limit to prevent budget blowouts
+      RETRY_ON_X_RATELIMIT: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
