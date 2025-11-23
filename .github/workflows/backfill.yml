@@ -1,0 +1,63 @@
+name: Backfill Queue
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    env:
+      EVENTREGISTRY_API_KEY: ${{ secrets.EVENTREGISTRY_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+      ARTICLES_LIMIT: ${{ vars.ARTICLES_LIMIT }}
+      TOPIC_QUERY: ${{ vars.TOPIC_QUERY }}
+      DEDUP_WINDOW_HOURS: "120"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compute cache keys
+        id: cache-keys
+        run: |
+          echo "CACHE_WEEK=$(date +%G-W%V)" >> $GITHUB_ENV
+          echo "CACHE_RUN=$(date +%s)-${{ github.run_id }}" >> $GITHUB_ENV
+
+      # Restore state to know what's already posted
+      - name: Restore state cache
+        id: cache-state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: news-bot-state-${{ env.CACHE_WEEK }}-${{ env.CACHE_RUN }}
+          restore-keys: |
+            news-bot-state-${{ env.CACHE_WEEK }}-
+            news-bot-state-
+
+      - name: Ensure state dir exists
+        run: mkdir -p .state
+
+      - name: Run backfill
+        run: |
+          python -m src.backfill
+
+      # Save state to persist the filled queue
+      - name: Save state cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .state
+          key: news-bot-state-${{ env.CACHE_WEEK }}-${{ env.CACHE_RUN }}
