@@ -40,8 +40,15 @@ def run():
         removed_c = _purge_crypto()
         removed_p = _purge_posted(event_hours=int(os.getenv("POST_EVENT_SKIP_HOURS", "72") or "72"))
         removed_company = _purge_company_dupes()
+
+        # Get current queue size for logging
+        from src.article_queue import _load as _load_queue
+
+        q_size = len(_load_queue())
+
         logger.info(
-            "main: queue cleanup done deduped=1 purged_crypto=%s purged_posted=%s purged_company_dupes=%s",
+            "main: queue cleanup done size=%d purged_crypto=%s purged_posted=%s purged_company_dupes=%s",
+            q_size,
             removed_c,
             removed_p,
             removed_company,
