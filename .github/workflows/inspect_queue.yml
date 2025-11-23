@@ -1,0 +1,42 @@
+name: Inspect Queue
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compute cache keys
+        id: cache-keys
+        run: |
+          echo "CACHE_WEEK=$(date +%G-W%V)" >> $GITHUB_ENV
+
+      # Restore state to get the queue
+      - name: Restore state cache
+        id: cache-state
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          # Restore the latest available cache for this week
+          key: news-bot-state-${{ env.CACHE_WEEK }}-
+          restore-keys: |
+            news-bot-state-${{ env.CACHE_WEEK }}-
+            news-bot-state-
+
+      - name: Run inspection
+        run: |
+          python -m src.inspect_queue
